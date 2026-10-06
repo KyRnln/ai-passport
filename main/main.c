@@ -1,155 +1,208 @@
-// main/main.c —— FoloToy AI Passport BSP 驱动参考示例:初始化 + 菜单 + 按键分发。
+// main/main.c —— AI Passport PC Monitor 应用入口。
 //
-// 按键语义(全局统一):
-//   上/下 短按   菜单中=移动选中项;演示页中=该页自定义
-//   确定  短按   菜单中=进入选中项;演示页中=该页自定义
-//   确定  长按   演示页中=返回菜单(由本文件统一拦截)
-#include "bsp_i2c.h"
-#include "bsp_display.h"
-#include "bsp_button.h"
-#include "bsp_audio.h"
+// 这是派生应用:启动后直接进入自有的监控界面,不使用基线 demo 的测试菜单
+// 与 ui_pixel 视觉外壳(BSP 驱动与并发模式仍然复用)。
+//
+// 按键语义(本应用自定义):
+//   上/下 短按   监控页与设备信息页之间切换
+//   确定  长按   进入 / 退出 Wi-Fi 配网模式
 #include "bsp_battery.h"
-#include "bsp_pins.h"      // 错误日志里要打印 BSP_LCD_* 引脚号
-#include "demo.h"
-#include "demo_navigation.h"
-#include "ui_pixel.h"
-#include "lvgl.h"
+#include "bsp_button.h"
+#include "bsp_display.h"
+#include "bsp_i2c.h"
+#include "bsp_pins.h"
+#include "pc_client.h"
+#include "pc_config.h"
+#include "pc_ui.h"
+#include "wifi_setup.h"
+
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "nvs_flash.h"
+
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
-static const char *TAG = "main";
+static const char *TAG = "app";
 
-static const demo_entry_t DEMOS[] = {
-    { .name = "Display", .enter = demo_display_enter, .exit = demo_display_exit,
-      .key = demo_display_key },
-    { .name = "Button", .enter = demo_button_enter, .exit = demo_button_exit,
-      .key = demo_button_key },
-    { .name = "Audio", .enter = demo_audio_enter, .exit = demo_audio_exit,
-      .key = demo_audio_key, .start = demo_audio_start, .stop = demo_audio_stop },
-    { .name = "Battery", .enter = demo_battery_enter, .exit = demo_battery_exit,
-      .key = demo_battery_key },
-    { .name = "Wi-Fi", .enter = demo_wifi_enter, .exit = demo_wifi_exit,
-      .key = demo_wifi_key, .start = demo_wifi_start, .stop = demo_wifi_stop },
-    { .name = "BLE", .enter = demo_ble_enter, .exit = demo_ble_exit,
-      .key = demo_ble_key, .start = demo_ble_start, .stop = demo_ble_stop },
-    { .name = "Low Power", .enter = demo_low_power_enter, .exit = demo_low_power_exit,
-      .key = demo_low_power_key, .start = demo_low_power_start, .stop = demo_low_power_stop },
-};
-#define DEMO_COUNT (sizeof(DEMOS) / sizeof(DEMOS[0]))
+// 事件位。显式写成移位表达式,避免依赖 BIT0 这类平台宏。
+#define REQ_MONITOR (1u << 0)
+#define REQ_SETUP (1u << 1)
 #define INPUT_QUEUE_DEPTH 8
+#define WIFI_WAIT_MS 20000
 
 typedef struct {
     bsp_btn_t btn;
     bsp_btn_ev_t event;
 } input_event_t;
 
-// 各外设初始化结果:失败的项在菜单里标 [FAIL] 且不允许进入。
-static bool s_ok[DEMO_COUNT];
-
-static lv_obj_t *s_menu_scr;
-static lv_obj_t *s_cards[DEMO_COUNT];
-static lv_obj_t *s_rows[DEMO_COUNT];
-static lv_obj_t *s_mascot;
-static demo_navigation_t s_navigation;
+static EventGroupHandle_t s_requests;
 static QueueHandle_t s_input_queue;
 static TaskHandle_t s_input_task;
 static volatile bool s_input_ready;
+static volatile bool s_in_setup;
+static bool s_monitoring;
 
-static void menu_refresh(void) {
-    for (size_t i = 0; i < DEMO_COUNT; i++) {
-        lv_label_set_text_fmt(s_rows[i], "%s%s",
-                              DEMOS[i].name,
-                              s_ok[i] ? "" : "  [FAIL]");
-        ui_pixel_set_selected(s_cards[i], i == s_navigation.selected, s_ok[i]);
-        lv_obj_set_style_text_color(s_rows[i],
-            s_ok[i] ? lv_color_hex(UI_INK) : lv_color_hex(0x7A2020), 0);
+static pc_config_t s_active_cfg;
+
+// ---------------------------------------------------------------------------
+// NVS
+// ---------------------------------------------------------------------------
+static esp_err_t storage_init(void)
+{
+    const esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // 与仓库基线一致:不自动擦除,避免丢掉用户已保存的配置。
+        ESP_LOGE(TAG, "NVS 需要重建(%s);请擦除 NVS 分区后重启设备",
+                 esp_err_to_name(err));
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "NVS 初始化失败: %s", esp_err_to_name(err));
     }
+    return err;
 }
 
-static void menu_build(void) {
-    s_menu_scr = ui_pixel_screen_create("FoloToy");
+// ---------------------------------------------------------------------------
+// 运行模式
+// ---------------------------------------------------------------------------
+static void enter_monitor_mode(void);
 
-    for (size_t i = 0; i < DEMO_COUNT; i++) {
-        int x = 11 + (int)(i % 2) * 112;
-        int y = 52 + (int)(i / 2) * 47;
-        s_cards[i] = ui_pixel_panel_create(s_menu_scr, x, y, 102, 40, UI_PAPER);
-        s_rows[i] = lv_label_create(s_cards[i]);
-        lv_obj_set_style_text_font(s_rows[i], &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_align(s_rows[i], LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_center(s_rows[i]);
+static void enter_setup_mode(void)
+{
+    if (s_monitoring) {
+        pc_client_stop();
+        wifi_setup_sta_disconnect();
+        s_monitoring = false;
     }
 
-    s_mascot = ui_pixel_mascot_create(s_menu_scr, 101, 242);
+    s_in_setup = true;
 
-    menu_refresh();
-    lv_screen_load(s_menu_scr);
-}
-
-static void enter_menu(void) {
-    menu_build();
-}
-
-static demo_nav_input_t navigation_input(bsp_btn_t btn, bsp_btn_ev_t event) {
-    if (event == BSP_BTN_LONG && btn == BSP_BTN_OK) return DEMO_NAV_INPUT_OK_LONG;
-    if (event != BSP_BTN_CLICK) return DEMO_NAV_INPUT_OTHER;
-    if (btn == BSP_BTN_UP) return DEMO_NAV_INPUT_UP_CLICK;
-    if (btn == BSP_BTN_DOWN) return DEMO_NAV_INPUT_DOWN_CLICK;
-    if (btn == BSP_BTN_OK) return DEMO_NAV_INPUT_OK_CLICK;
-    return DEMO_NAV_INPUT_OTHER;
-}
-
-static void process_input(const input_event_t *input) {
-    demo_nav_input_t nav_input = navigation_input(input->btn, input->event);
-
-    if (s_navigation.active >= 0) {
-        demo_nav_result_t result = demo_navigation_handle(&s_navigation, nav_input, true);
-        const demo_entry_t *demo = &DEMOS[result.index];
-        if (result.action == DEMO_NAV_ACTION_EXIT) {
-            esp_err_t e = demo->stop ? demo->stop() : ESP_OK;
-            if (e != ESP_OK) {
-                ESP_LOGE(TAG, "%s 页面停止失败: %s", demo->name, esp_err_to_name(e));
-                return;
-            }
-            if (!bsp_lvgl_lock(500)) return;
-            demo->exit();
-            demo_navigation_complete_exit(&s_navigation);
-            enter_menu();
-            bsp_lvgl_unlock();
-        } else if (result.action == DEMO_NAV_ACTION_FORWARD) {
-            demo->key(input->btn, input->event);
-        }
+    const esp_err_t err = wifi_setup_ap_start();
+    if (err != ESP_OK) {
+        s_in_setup = false;
+        pc_ui_show_message("Setup unavailable",
+                           "Could not start the setup access point. Reboot the device and try again.");
         return;
     }
 
-    if (nav_input == DEMO_NAV_INPUT_OTHER || nav_input == DEMO_NAV_INPUT_OK_LONG) return;
-    if (!bsp_lvgl_lock(500)) return;
-    demo_nav_result_t result = demo_navigation_handle(
-        &s_navigation, nav_input, s_ok[s_navigation.selected]);
-    if (result.action == DEMO_NAV_ACTION_REFRESH) {
-        menu_refresh();
-        ui_pixel_mascot_jump(s_mascot);
-    } else if (result.action == DEMO_NAV_ACTION_ENTER) {
-        const demo_entry_t *demo = &DEMOS[result.index];
-        ui_pixel_mascot_jump(s_mascot);
-        lv_obj_delete(s_menu_scr);
-        s_menu_scr = NULL;
-        s_mascot = NULL;
-        demo->enter();
-        bsp_lvgl_unlock();
+    wifi_setup_clear_configured();
+    pc_ui_show_setup();
 
-        esp_err_t e = demo->start ? demo->start() : ESP_OK;
-        if (e != ESP_OK) {
-            ESP_LOGE(TAG, "%s 页面启动失败: %s", demo->name, esp_err_to_name(e));
+    // 等待网页提交成功,或用户长按确定键退出配网。
+    for (;;) {
+        const EventBits_t bits = xEventGroupWaitBits(s_requests, REQ_MONITOR, pdTRUE,
+                                                     pdFALSE, pdMS_TO_TICKS(500));
+        if ((bits & REQ_MONITOR) != 0 || wifi_setup_configured()) {
+            break;
         }
-        return;
     }
-    bsp_lvgl_unlock();
+
+    wifi_setup_ap_stop();
+    wifi_setup_clear_configured();
+    s_in_setup = false;
+
+    pc_config_t cfg;
+    if (pc_config_load(&cfg) == ESP_OK && pc_config_complete(&cfg)) {
+        s_active_cfg = cfg;
+        pc_ui_set_config(&cfg);
+        enter_monitor_mode();
+    } else {
+        pc_ui_show_message("Not configured",
+                           "No saved Wi-Fi / AIDA64 settings. Hold OK to run setup again.");
+    }
 }
 
-static void input_task(void *arg) {
+static void enter_monitor_mode(void)
+{
+    if (!pc_config_complete(&s_active_cfg)) {
+        pc_ui_show_message("Not configured",
+                           "Hold OK to connect Wi-Fi and enter the AIDA64 PC address.");
+        return;
+    }
+
+    s_monitoring = true;
+    pc_ui_show_monitor();
+
+    uint32_t attempts = 0;
+    while (!wifi_setup_sta_has_ip() && attempts < 3) {
+        attempts++;
+        if (wifi_setup_sta_connect(&s_active_cfg) != ESP_OK) {
+            break;
+        }
+        if (wifi_setup_sta_wait_connected(WIFI_WAIT_MS)) {
+            break;
+        }
+        ESP_LOGW(TAG, "第 %u 次连接 Wi-Fi 超时", (unsigned)attempts);
+    }
+
+    if (!wifi_setup_sta_has_ip()) {
+        s_monitoring = false;
+        pc_ui_show_message("Wi-Fi not connected",
+                           "Check that the network is 2.4GHz and in range, then hold OK to run setup again.");
+        return;
+    }
+
+    const esp_err_t err = pc_client_start(&s_active_cfg);
+    if (err != ESP_OK) {
+        s_monitoring = false;
+        pc_ui_show_message("Monitor start failed",
+                           "Could not start the AIDA64 client. Hold OK to reconfigure.");
+        return;
+    }
+
+    wifi_setup_clear_configured();
+    ESP_LOGI(TAG, "监控已启动: PC=%s:%u", s_active_cfg.host,
+             (unsigned)s_active_cfg.port);
+}
+
+static void app_task(void *arg)
+{
+    (void)arg;
+
+    pc_config_t cfg;
+    const esp_err_t err = pc_config_load(&cfg);
+    if (err == ESP_OK && pc_config_complete(&cfg)) {
+        s_active_cfg = cfg;
+        pc_ui_set_config(&cfg);
+        xEventGroupSetBits(s_requests, REQ_MONITOR);
+    } else {
+        ESP_LOGI(TAG, "尚无有效配置,进入配网模式");
+        xEventGroupSetBits(s_requests, REQ_SETUP);
+    }
+
+    for (;;) {
+        const EventBits_t bits = xEventGroupWaitBits(
+            s_requests, REQ_MONITOR | REQ_SETUP, pdTRUE, pdFALSE, portMAX_DELAY);
+        if ((bits & REQ_SETUP) != 0) {
+            enter_setup_mode();
+        } else if ((bits & REQ_MONITOR) != 0) {
+            enter_monitor_mode();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 按键分发
+// ---------------------------------------------------------------------------
+static void process_input(const input_event_t *input)
+{
+    if (input->event == BSP_BTN_LONG && input->btn == BSP_BTN_OK) {
+        // 长按确定键 = 在配网态与监控态之间切换。
+        xEventGroupSetBits(s_requests, s_in_setup ? REQ_MONITOR : REQ_SETUP);
+        return;
+    }
+
+    if (input->event == BSP_BTN_CLICK &&
+        (input->btn == BSP_BTN_UP || input->btn == BSP_BTN_DOWN)) {
+        if (!s_in_setup) {
+            pc_ui_next_page();
+        }
+    }
+}
+
+static void input_task(void *arg)
+{
     (void)arg;
     input_event_t input;
     for (;;) {
@@ -159,84 +212,80 @@ static void input_task(void *arg) {
     }
 }
 
-static esp_err_t input_dispatch_init(void) {
-    s_input_queue = xQueueCreate(INPUT_QUEUE_DEPTH, sizeof(input_event_t));
-    if (!s_input_queue) return ESP_ERR_NO_MEM;
-    if (xTaskCreate(input_task, "demo_input", 4096, NULL, 5, &s_input_task) != pdPASS) {
-        vQueueDelete(s_input_queue);
-        s_input_queue = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
-}
-
-static void input_dispatch_deinit(void) {
-    s_input_ready = false;
-    if (s_input_task) {
-        vTaskDelete(s_input_task);
-        s_input_task = NULL;
-    }
-    if (s_input_queue) {
-        vQueueDelete(s_input_queue);
-        s_input_queue = NULL;
-    }
-}
-
-// button callbacks run on the shared esp_timer task; enqueue only and return immediately.
-static void on_key(bsp_btn_t btn, bsp_btn_ev_t ev, void *user) {
+// 按键回调运行在共享的 esp_timer 任务上:只入队,立即返回。
+static void on_key(bsp_btn_t btn, bsp_btn_ev_t event, void *user)
+{
     (void)user;
-    if (!s_input_ready || !s_input_queue) return;
-    const input_event_t input = { .btn = btn, .event = ev };
+    if (!s_input_ready || s_input_queue == NULL) {
+        return;
+    }
+    const input_event_t input = { .btn = btn, .event = event };
     (void)xQueueSend(s_input_queue, &input, 0);
 }
 
-void app_main(void) {
-    ESP_LOGI(TAG, "FoloToy AI Passport BSP demo 启动");
-    esp_sleep_wakeup_cause_t wakeup = esp_sleep_get_wakeup_cause();
-    if (wakeup != ESP_SLEEP_WAKEUP_UNDEFINED) {
-        ESP_LOGI(TAG, "休眠唤醒原因: %d", wakeup);
+// ---------------------------------------------------------------------------
+// 入口
+// ---------------------------------------------------------------------------
+void app_main(void)
+{
+    ESP_LOGI(TAG, "AI Passport PC Monitor 启动");
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        ESP_LOGI(TAG, "休眠唤醒,继续运行监控应用");
     }
 
     bsp_i2c_init();
-    bsp_i2c_scan();
 
-    // 屏幕是本 demo 的 UI 载体,失败就没有菜单可言 —— 打清楚日志后退出,
-    // 不做"串口菜单"降级(那会让本文件复杂一倍,违背参考示例的初衷)。
-    if (bsp_display_init() != ESP_OK || !bsp_lvgl_init()) {
-        ESP_LOGE(TAG, "显示/LVGL 初始化失败,demo 无法继续。"
+    if (bsp_display_init() != ESP_OK || bsp_lvgl_init() == NULL) {
+        ESP_LOGE(TAG, "显示/LVGL 初始化失败,应用无法启动。"
                       "检查 SPI 接线(MOSI=%d SCLK=%d CS=%d DC=%d BL=%d)",
                  BSP_LCD_MOSI, BSP_LCD_SCLK, BSP_LCD_CS, BSP_LCD_DC, BSP_LCD_BL);
         return;
     }
     bsp_display_backlight(100);
 
-    demo_navigation_init(&s_navigation, DEMO_COUNT);
+    // 外设单项失败不阻塞:电量读不到时界面不显示数字。
+    (void)bsp_battery_init();
 
-    // 其余外设单项失败不阻塞:菜单里标 [FAIL],其他项照常可测。
-    s_ok[0] = true;                                   // Display 已确认可用
-    esp_err_t input_err = input_dispatch_init();
-    esp_err_t button_err = input_err == ESP_OK
-                         ? bsp_button_init(on_key, NULL)
-                         : ESP_ERR_INVALID_STATE;
-    s_ok[1] = input_err == ESP_OK && button_err == ESP_OK;
-    if (input_err != ESP_OK) {
-        ESP_LOGE(TAG, "按键事件任务创建失败: %s", esp_err_to_name(input_err));
-    } else if (button_err != ESP_OK) {
-        ESP_LOGE(TAG, "按键初始化失败: %s", esp_err_to_name(button_err));
-        input_dispatch_deinit();
+    if (storage_init() != ESP_OK) {
+        ESP_LOGW(TAG, "配置存储不可用;本次运行的配置不会保存");
     }
-    s_ok[2] = (bsp_audio_init() == ESP_OK);
-    s_ok[3] = (bsp_battery_init() == ESP_OK);
-    s_ok[4] = true;                                    // 页面内按需初始化并显示错误
-    s_ok[5] = true;
-    s_ok[6] = true;
+
+    s_requests = xEventGroupCreate();
+    if (s_requests == NULL) {
+        ESP_LOGE(TAG, "创建事件组失败");
+        return;
+    }
+
+    s_input_queue = xQueueCreate(INPUT_QUEUE_DEPTH, sizeof(input_event_t));
+    if (s_input_queue == NULL) {
+        ESP_LOGE(TAG, "创建按键队列失败");
+        return;
+    }
+    if (xTaskCreate(input_task, "app_input", 4096, NULL, 5, &s_input_task) != pdPASS) {
+        ESP_LOGE(TAG, "创建按键任务失败");
+        return;
+    }
 
     if (bsp_lvgl_lock(1000)) {
-        enter_menu();
+        pc_ui_init();
         bsp_lvgl_unlock();
-        s_input_ready = true;
     }
 
-    ESP_LOGI(TAG, "就绪:Display=%d Button=%d Audio=%d Battery=%d",
-             s_ok[0], s_ok[1], s_ok[2], s_ok[3]);
+    const esp_err_t button_err = bsp_button_init(on_key, NULL);
+    if (button_err != ESP_OK) {
+        ESP_LOGE(TAG, "按键初始化失败: %s;仅长按配网与翻页将不可用",
+                 esp_err_to_name(button_err));
+    }
+    s_input_ready = true;
+
+    if (wifi_setup_prepare() != ESP_OK) {
+        ESP_LOGE(TAG, "网络栈初始化失败,本次启动无法联网");
+        pc_ui_show_message("Network unavailable",
+                           "Wi-Fi failed to initialize. Reboot the device and try again.");
+        return;
+    }
+
+    if (xTaskCreate(app_task, "app_ctrl", 6144, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "创建应用任务失败");
+    }
 }
