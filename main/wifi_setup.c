@@ -228,12 +228,24 @@ static const char PAGE_HTML[] =
     "border:1px solid #2a3550;background:#161d2e;color:#e8eef7;font-size:15px}"
     "button{margin-top:22px;width:100%;padding:13px;border:0;border-radius:10px;"
     "background:#2f7cf6;color:#fff;font-size:16px;font-weight:600}"
+    "#scanBtn{width:auto;margin:10px 0 0;padding:9px 14px;font-size:13px;"
+    "background:#26324a;color:#cfe0ff;font-weight:500}"
+    "#scanBtn:disabled{opacity:.6}"
+    ".ap{margin-top:8px;padding:10px 12px;border-radius:8px;background:#161d2e;"
+    "border:1px solid #2a3550;font-size:14px;color:#cfe0ff;cursor:pointer;"
+    "display:flex;justify-content:space-between;align-items:center;gap:10px}"
+    ".ap.sel{border-color:#2f7cf6;background:#1b2740}"
+    ".ap small{color:#6f8098;font-size:12px;white-space:nowrap}"
+    "#list{margin-top:6px;font-size:13px;color:#6f8098;line-height:1.5}"
     ".hint{margin-top:16px;font-size:12px;color:#6f8098;line-height:1.5}"
     "</style></head><body>"
     "<h1>AI Passport</h1>"
     "<p>连接 2.4GHz Wi-Fi,并填入运行 AIDA64 的电脑地址</p>"
     "<form method=\"post\" action=\"/save\">"
-    "<label>Wi-Fi 名称 (SSID)</label><input name=\"ssid\" maxlength=\"32\" required>"
+    "<label>Wi-Fi 名称 (SSID)</label>"
+    "<input name=\"ssid\" id=\"ssid\" maxlength=\"32\" required>"
+    "<button type=\"button\" id=\"scanBtn\">扫描附近的 Wi-Fi</button>"
+    "<div id=\"list\"></div>"
     "<label>Wi-Fi 密码</label><input name=\"pass\" type=\"password\" maxlength=\"63\">"
     "<label>AIDA64 电脑地址</label><input name=\"host\" maxlength=\"63\" "
     "placeholder=\"192.168.1.10\" required>"
@@ -241,6 +253,30 @@ static const char PAGE_HTML[] =
     "<button type=\"submit\">保存并连接</button></form>"
     "<div class=\"hint\">端口需与 AIDA64 RemoteSensor 设置一致(默认 80)。"
     "保存后设备会先验证 Wi-Fi 连接,成功才写入配置并开始监控。</div>"
+    "<script>"
+    "var apList=document.getElementById('list');"
+    "function pick(ssid,el){document.getElementById('ssid').value=ssid;"
+    "var a=document.querySelectorAll('.ap');for(var i=0;i<a.length;i++)"
+    "{a[i].classList.remove('sel');}el.classList.add('sel');}"
+    "function scanDone(){var b=document.getElementById('scanBtn');b.disabled=false;"
+    "b.textContent='重新扫描';}"
+    "function scan(){var b=document.getElementById('scanBtn');b.disabled=true;"
+    "b.textContent='扫描中...';apList.textContent='正在扫描,约需数秒...';tryScan(1);}"
+    "function tryScan(left){"
+    "fetch('/scan').then(function(r){return r.json();}).then(function(list){"
+    "apList.textContent='';"
+    "if(!list.length){apList.textContent='没扫到 2.4GHz 网络,可手动填写 SSID。';scanDone();return;}"
+    "list.forEach(function(x){var d=document.createElement('div');d.className='ap';"
+    "var n=document.createElement('span');n.textContent=x.ssid;d.appendChild(n);"
+    "var m=document.createElement('small');"
+    "m.textContent=x.rssi+' dBm'+(x.secure?'':' | 开放');d.appendChild(m);"
+    "d.onclick=function(){pick(x.ssid,d);};apList.appendChild(d);});scanDone();})"
+    ".catch(function(){if(left>0){apList.textContent='扫描中断,2 秒后重试...';"
+    "setTimeout(function(){tryScan(left-1);},2000);return;}"
+    "apList.textContent='扫描失败,请重试或手动填写 SSID。';scanDone();});}"
+    // 在脚本里绑定,避免内联 onclick 的 form 作用域把 scan 解析成同名按钮。
+    "document.getElementById('scanBtn').onclick=scan;"
+    "</script>"
     "</body></html>";
 
 // 分块发送一个简短结果页,避免为此再多留一块页面缓冲。
@@ -270,7 +306,77 @@ static esp_err_t send_result(httpd_req_t *req, const char *status, const char *t
 static esp_err_t handler_root(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
+    // 配置页必须每次取新的:否则手机浏览器可能一直用缓存的旧页面。
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, PAGE_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+// 有界的 JSON 拼接:SSID 是外部输入,必须转义,且整体不能溢出。
+typedef struct {
+    char *buf;
+    size_t cap;
+    size_t len;
+} json_writer_t;
+
+static void jw_put(json_writer_t *w, const char *text)
+{
+    while (*text != '\0' && w->len + 1 < w->cap) {
+        w->buf[w->len++] = *text++;
+    }
+    w->buf[w->len] = '\0';
+}
+
+static void jw_put_escaped(json_writer_t *w, const char *text)
+{
+    for (const unsigned char *p = (const unsigned char *)text; *p != '\0'; ++p) {
+        char piece[8];
+        if (*p == '"' || *p == '\\') {
+            piece[0] = '\\';
+            piece[1] = (char)*p;
+            piece[2] = '\0';
+        } else if (*p < 0x20) {
+            snprintf(piece, sizeof(piece), "\\u%04x", (unsigned)*p);
+        } else {
+            piece[0] = (char)*p;   // >=0x80 的 UTF-8 字节原样输出
+            piece[1] = '\0';
+        }
+        jw_put(w, piece);
+    }
+}
+
+static esp_err_t handler_scan(httpd_req_t *req)
+{
+    static wifi_setup_ap_t aps[WIFI_SETUP_SCAN_MAX];
+    static char json[2048];
+
+    const int count = wifi_setup_scan(aps, WIFI_SETUP_SCAN_MAX);
+    if (count < 0) {
+        ESP_LOGW(TAG, "/scan 失败");
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        return httpd_resp_send(req, "[]", HTTPD_RESP_USE_STRLEN);
+    }
+
+    json_writer_t w = { .buf = json, .cap = sizeof(json), .len = 0 };
+    json[0] = '\0';
+    jw_put(&w, "[");
+    for (int i = 0; i < count; ++i) {
+        char tail[48];
+        if (i > 0) {
+            jw_put(&w, ",");
+        }
+        jw_put(&w, "{\"ssid\":\"");
+        jw_put_escaped(&w, aps[i].ssid);
+        snprintf(tail, sizeof(tail), "\",\"rssi\":%d,\"secure\":%s}", (int)aps[i].rssi,
+                 aps[i].secure ? "true" : "false");
+        jw_put(&w, tail);
+    }
+    jw_put(&w, "]");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
 static esp_err_t handler_save(httpd_req_t *req)
@@ -362,7 +468,7 @@ static esp_err_t handler_save(httpd_req_t *req)
 static esp_err_t start_httpd(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 4;
+    config.max_uri_handlers = 6;
     config.max_open_sockets = 3;   // 单用户配置页,按参考取值收敛
     config.lru_purge_enable = true;
     config.stack_size = 6144;
@@ -380,6 +486,12 @@ static esp_err_t start_httpd(void)
         .handler = handler_root,
         .user_ctx = NULL,
     };
+    const httpd_uri_t uri_scan = {
+        .uri = "/scan",
+        .method = HTTP_GET,
+        .handler = handler_scan,
+        .user_ctx = NULL,
+    };
     const httpd_uri_t uri_save = {
         .uri = "/save",
         .method = HTTP_POST,
@@ -388,6 +500,9 @@ static esp_err_t start_httpd(void)
     };
 
     err = httpd_register_uri_handler(s_httpd, &uri_root);
+    if (err == ESP_OK) {
+        err = httpd_register_uri_handler(s_httpd, &uri_scan);
+    }
     if (err == ESP_OK) {
         err = httpd_register_uri_handler(s_httpd, &uri_save);
     }
@@ -484,6 +599,60 @@ void wifi_setup_ap_stop(void)
 bool wifi_setup_ap_active(void)
 {
     return s_ap_active;
+}
+
+int wifi_setup_scan(wifi_setup_ap_t *out, int max)
+{
+    if (!s_wifi_ready || out == NULL || max <= 0) {
+        return -1;
+    }
+    if (max > WIFI_SETUP_SCAN_MAX) {
+        max = WIFI_SETUP_SCAN_MAX;
+    }
+
+    // 扫描结果约 2KB:放静态缓冲,不占 httpd 任务栈,也不在无 PSRAM 的板子上堆分配。
+    static wifi_ap_record_t records[WIFI_SETUP_SCAN_MAX];
+
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    (void)esp_wifi_get_mode(&mode);
+    ESP_LOGI(TAG, "开始扫描附近热点(mode=%d)", (int)mode);
+
+    const wifi_scan_config_t scan_cfg = { .show_hidden = false };
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);  // 阻塞式,结束后结果在驱动里
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "扫描失败: %s", esp_err_to_name(err));
+        (void)esp_wifi_clear_ap_list();
+        return -1;
+    }
+
+    uint16_t found = WIFI_SETUP_SCAN_MAX;
+    err = esp_wifi_scan_get_ap_records(&found, records);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "读取扫描结果失败: %s", esp_err_to_name(err));
+        (void)esp_wifi_clear_ap_list();  // 未成功取走,主动释放驱动侧缓存
+        return -1;
+    }
+    ESP_LOGI(TAG, "扫描完成,共 %u 个热点", (unsigned)found);
+
+    const int n = found < (uint16_t)max ? (int)found : max;
+    for (int i = 0; i < n; ++i) {
+        memset(&out[i], 0, sizeof(out[i]));
+        strlcpy(out[i].ssid, (const char *)records[i].ssid, sizeof(out[i].ssid));
+        out[i].rssi = records[i].rssi;
+        out[i].secure = records[i].authmode != WIFI_AUTH_OPEN;
+    }
+
+    // 按信号强度降序,页面直接从上往下展示。
+    for (int i = 1; i < n; ++i) {
+        const wifi_setup_ap_t key = out[i];
+        int j = i - 1;
+        while (j >= 0 && out[j].rssi < key.rssi) {
+            out[j + 1] = out[j];
+            --j;
+        }
+        out[j + 1] = key;
+    }
+    return n;
 }
 
 bool wifi_setup_configured(void)

@@ -4,8 +4,13 @@
 // 与 ui_pixel 视觉外壳(BSP 驱动与并发模式仍然复用)。
 //
 // 按键语义(本应用自定义):
-//   上/下 短按   监控页与设备信息页之间切换
-//   确定  长按   进入 / 退出 Wi-Fi 配网模式
+//   监控主页   确定长按   进入设置(短按不动作)
+//   设置页     上下短按   选择条目(仅选中项有高亮边框)
+//              确定短按   进入条目 / 结束亮度调节
+//              确定长按   返回监控主页
+//   亮度条目   上键调亮、下键调暗;10 档步进(范围 10..100)
+//   Wi-Fi 条目 确定短按   二次确认后才进入配网
+//   配网态     确定长按   退出配网
 #include "bsp_battery.h"
 #include "bsp_button.h"
 #include "bsp_display.h"
@@ -187,17 +192,37 @@ static void app_task(void *arg)
 // ---------------------------------------------------------------------------
 static void process_input(const input_event_t *input)
 {
-    if (input->event == BSP_BTN_LONG && input->btn == BSP_BTN_OK) {
-        // 长按确定键 = 在配网态与监控态之间切换。
-        xEventGroupSetBits(s_requests, s_in_setup ? REQ_MONITOR : REQ_SETUP);
+    // 配网态只显示配网引导页:长按确定退出,其余按键不参与界面导航。
+    if (s_in_setup) {
+        if (input->event == BSP_BTN_LONG && input->btn == BSP_BTN_OK) {
+            xEventGroupSetBits(s_requests, REQ_MONITOR);
+        }
         return;
     }
 
-    if (input->event == BSP_BTN_CLICK &&
-        (input->btn == BSP_BTN_UP || input->btn == BSP_BTN_DOWN)) {
-        if (!s_in_setup) {
-            pc_ui_next_page();
-        }
+    if (input->event != BSP_BTN_CLICK && input->event != BSP_BTN_LONG) {
+        return;
+    }
+    const bool is_long = (input->event == BSP_BTN_LONG);
+
+    // 界面导航全部由 UI 状态机决定;它只会向应用层请求"进入配网"这一个动作。
+    pc_ui_action_t action = PC_UI_ACTION_NONE;
+    switch (input->btn) {
+    case BSP_BTN_UP:
+        action = pc_ui_on_up(is_long);
+        break;
+    case BSP_BTN_DOWN:
+        action = pc_ui_on_down(is_long);
+        break;
+    case BSP_BTN_OK:
+        action = pc_ui_on_ok(is_long);
+        break;
+    default:
+        break;
+    }
+
+    if (action == PC_UI_ACTION_ENTER_SETUP) {
+        xEventGroupSetBits(s_requests, REQ_SETUP);
     }
 }
 
@@ -241,7 +266,8 @@ void app_main(void)
                  BSP_LCD_MOSI, BSP_LCD_SCLK, BSP_LCD_CS, BSP_LCD_DC, BSP_LCD_BL);
         return;
     }
-    bsp_display_backlight(100);
+    // 先用默认亮度点亮,pc_ui_init() 随后按 NVS 里保存的档位覆盖。
+    bsp_display_backlight(PC_CFG_BRIGHTNESS_DEFAULT);
 
     // 外设单项失败不阻塞:电量读不到时界面不显示数字。
     (void)bsp_battery_init();

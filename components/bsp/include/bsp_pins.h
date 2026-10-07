@@ -10,8 +10,10 @@
 // ============================================================================
 // 显示:ST7789P3 240x320,4-line SPI
 // ============================================================================
-#define BSP_LCD_W            240
-#define BSP_LCD_H            320
+// 逻辑分辨率(横屏):面板物理为 240x320,LVGL 侧用 MADCTL 交换 XY 后按 320x240 使用。
+// 若要改回竖屏,需把这里换回 240x320 并同步调整 esp_lvgl_port 的 rotation.swap_xy。
+#define BSP_LCD_W            320
+#define BSP_LCD_H            240
 #define BSP_LCD_SPI_HOST     SPI2_HOST
 #define BSP_LCD_MOSI         9
 #define BSP_LCD_SCLK         8

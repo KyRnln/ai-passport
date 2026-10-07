@@ -3,13 +3,22 @@
 #include "bsp_display.h"
 #include "bsp_display_rounding.h"
 #include "bsp_pins.h"
+#include "esp_lcd_panel_ops.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char *TAG = "bsp_lvgl";
 
-#define BSP_LVGL_DRAW_BUFFER_LINES 40
+// 横屏单缓冲:320 x 30 行 ≈ 19.2KB,与原竖屏 240 x 40 行占用一致,
+// 避免在无 PSRAM 的板子上多占内部 RAM。
+#define BSP_LVGL_DRAW_BUFFER_LINES 30
+
+// 横屏基准朝向(swap_xy = true 之后):
+//   MIRROR_Y 决定逻辑"左右"镜像,MIRROR_X 决定逻辑"上下"镜像。
+//   "翻转 180°" = 两位同时取反,所以只有基准两位的奇偶组合决定画面手性。
+#define DISP_MIRROR_X false
+#define DISP_MIRROR_Y true
 
 static lv_display_t *s_disp;
 static bool s_port_initialized;
@@ -86,7 +95,9 @@ lv_display_t *bsp_lvgl_init(void) {
         .hres = BSP_LCD_W, .vres = BSP_LCD_H,
         // 旋转/镜像必须在这里配:esp_lvgl_port 注册显示时会重新下发 MADCTL,
         // 覆盖 bsp_display.c 里 esp_lcd_panel_mirror() 的设置。
-        .rotation = { .swap_xy = false, .mirror_x = false, .mirror_y = false },
+        // swap_xy = true 把物理 240x320 当作逻辑 320x240(横屏)。
+        .rotation = { .swap_xy = true, .mirror_x = DISP_MIRROR_X,
+                      .mirror_y = DISP_MIRROR_Y },
         // swap_bytes:LVGL 输出小端 RGB565,ST7789 走 SPI 要大端 → 需交换高低字节。
         .flags = { .buff_dma = true, .swap_bytes = true },
     };
@@ -129,4 +140,20 @@ bool bsp_lvgl_lock(int timeout_ms) {
 }
 void bsp_lvgl_unlock(void) {
     if (s_disp) lvgl_port_unlock();
+}
+
+esp_err_t bsp_lvgl_set_flipped(bool flipped)
+{
+    if (s_disp == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_lcd_panel_handle_t panel = bsp_display_panel();
+    if (panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    // 横屏基准为 DISP_MIRROR_X / DISP_MIRROR_Y;两位同时取反 = 画面 180°。
+    // 纯 MADCTL 操作,不改变 LVGL 分辨率,因此不会触发 port 重下发旋转配置。
+    const bool mirror_x = flipped ? !DISP_MIRROR_X : DISP_MIRROR_X;
+    const bool mirror_y = flipped ? !DISP_MIRROR_Y : DISP_MIRROR_Y;
+    return esp_lcd_panel_mirror(panel, mirror_x, mirror_y);
 }

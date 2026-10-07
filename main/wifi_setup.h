@@ -17,7 +17,8 @@
 
 #define WIFI_SETUP_AP_SSID "AIPassport-Setup"
 #define WIFI_SETUP_AP_PASS "aipassport"      // 至少 8 位,避免开放热点
-#define WIFI_SETUP_AP_URL "http://192.168.4.1"
+#define WIFI_SETUP_AP_IP "192.168.4.1"
+#define WIFI_SETUP_AP_URL "http://" WIFI_SETUP_AP_IP
 #define WIFI_SETUP_STA_VERIFY_MS 15000       // 提交表单后等待 STA 拿到 IP 的上限
 
 // 初始化 netif / 事件循环 / Wi-Fi 驱动,并以 STA 模式启动(不连接)。
@@ -43,6 +44,19 @@ esp_err_t wifi_setup_ap_start(void);
 void wifi_setup_ap_stop(void);
 
 bool wifi_setup_ap_active(void);
+
+// 配网时扫描附近热点,供配置网页列出后点选(避免手输 SSID)。
+// 只在配网(热点)态有意义;结果是阻塞扫描,单次约 2-4 秒。
+// 返回写入 out 的条目数(0 表示没扫到);失败返回 -1。
+#define WIFI_SETUP_SCAN_MAX 16
+
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    bool secure;
+} wifi_setup_ap_t;
+
+int wifi_setup_scan(wifi_setup_ap_t *out, int max);
 
 // 配网页面是否已成功保存并验证了新配置。应用层据此切回监控态。
 bool wifi_setup_configured(void);

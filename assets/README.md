@@ -12,6 +12,25 @@ Keep each asset in the matching subdirectory and document its destination, namin
 
 Store reusable font files and generated font sources in `fonts/`.
 
+| File | Type | Use and source |
+| --- | --- | --- |
+| [`fonts/ProggyCleanSZ-1.ttf`](fonts/ProggyCleanSZ-1.ttf) | TTF, 16 px pixel font | Source font for the PC Monitor terminal-style UI. ProggyClean by Tristan Grimmer (2004); a free programming font whose license permits redistribution. Not shipped to the device directly. |
+| [`fonts/proggy_16.c`](fonts/proggy_16.c) | LVGL 9 font, 1 bpp, 16 px | Body/label size selected by `main/pc_ui.c`. |
+| [`fonts/proggy_32.c`](fonts/proggy_32.c) | LVGL 9 font, 1 bpp, 32 px | Title and large-percentage size selected by `main/pc_ui.c`. |
+
+Converted with `lv_font_conv` 1.5.3 from the repository root (ASCII range only):
+
+```bash
+npx lv_font_conv --font assets/fonts/ProggyCleanSZ-1.ttf --range 0x20-0x7E --size 16 \
+  --bpp 1 --format lvgl --no-compress --lv-font-name proggy_16 \
+  --lv-include lvgl.h --output assets/fonts/proggy_16.c
+npx lv_font_conv --font assets/fonts/ProggyCleanSZ-1.ttf --range 0x20-0x7E --size 32 \
+  --bpp 1 --format lvgl --no-compress --lv-font-name proggy_32 \
+  --lv-include lvgl.h --output assets/fonts/proggy_32.c
+```
+
+ProggyClean is a 16 px-native pixel font (2048-unit em on a 128-unit grid), so only integer multiples of 16 stay crisp; the generated fonts are registered in `main/CMakeLists.txt` and cost about 41 KB of Flash across both sizes.
+
 - Use descriptive names that include the family, weight, size, and format when relevant.
 - Document the source, license, character range, conversion command, and expected destination.
 - Check Flash and internal-RAM impact before adding a font; the ESP32-C3 has no PSRAM.

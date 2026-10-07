@@ -11,6 +11,10 @@
 // 【最后一个数字】作为百分比 —— 取最后一个而不是第一个,是为了兼容
 // "CPU #1 Utilization 12 %" 这类 Label 自带数字的情况。
 //
+// 另识别 AIDA64 的"系统运行时间"项(Label 含 "UpTime"/"Up Time"/"运行时间"/
+// "开机时间"):该值是时长文本(如 "1:23:45" 或 "1 day 2:03:04"),按
+// h:mm[:ss] 解析成总秒数,顶栏用它显示 PC 已运行时间。
+//
 // 重要:本解析器【不按整行缓冲】。AIDA64 一帧里包含用户添加的全部 LCD 项,
 // 项多时该行可达数 KB;按行缓存会在无 PSRAM 的板子上浪费内存。这里改为
 // 按 "{|}" 记录切分,只缓冲单条记录(PC_METRICS_SEG_MAX),内存占用与项数无关。
@@ -28,6 +32,8 @@ typedef struct {
     bool cpu_valid;
     bool gpu_valid;
     bool mem_valid;
+    uint32_t uptime_sec;    // PC 已运行时间(秒),来自 AIDA64 的 UpTime 项
+    bool uptime_valid;
 } pc_metrics_t;
 
 // 单条记录缓冲上限。一条记录只是 "id|label value unit",160 字节足够宽松;

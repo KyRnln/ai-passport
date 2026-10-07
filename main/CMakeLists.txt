@@ -13,3 +13,9 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES bsp esp_event esp_http_client esp_http_server esp_netif esp_timer esp_wifi nvs_flash
 )
+
+# ProggyClean 终端等宽字体(由 assets/fonts 下的 TTF 转换生成,见 assets/README.md)。
+target_sources(${COMPONENT_LIB} PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/proggy_16.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/proggy_32.c"
+)

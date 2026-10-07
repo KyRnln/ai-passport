@@ -24,7 +24,8 @@ CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_DEF_REFR_PERIOD=20
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
-# 监控页的大号百分比数字使用 28 号。
+# 应用界面自 2026-10 起改用 ProggyClean(assets/fonts/proggy_*.c),不再直接使用
+# Montserrat 20/28;这里保留 14(它是 LVGL 默认字体的兜底)并保留另两档以备复用。
 CONFIG_LV_FONT_MONTSERRAT_28=y
 # LVGL 内置 malloc 池大小(KB)。它是独立静态区、不与系统堆共享,配大了会白白占用 RAM。
 # 本 demo UI 简单,24KB 足够;若自建复杂界面出现绘制卡死/看门狗,调大此值。

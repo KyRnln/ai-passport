@@ -10,6 +10,25 @@
 
 可复用的字库文件与生成的字库源码放在 `fonts/`。
 
+| 文件 | 类型 | 用途与来源 |
+| --- | --- | --- |
+| [`fonts/ProggyCleanSZ-1.ttf`](fonts/ProggyCleanSZ-1.ttf) | TTF，16px 像素字体 | PC Monitor 终端风格界面的源字体。作者 Tristan Grimmer（2004），许可允许再分发。不直接烧录到设备。 |
+| [`fonts/proggy_16.c`](fonts/proggy_16.c) | LVGL 9 字体，1 bpp，16px | `main/pc_ui.c` 使用的正文/标签字号。 |
+| [`fonts/proggy_32.c`](fonts/proggy_32.c) | LVGL 9 字体，1 bpp，32px | `main/pc_ui.c` 使用的标题与大号百分比字号。 |
+
+使用 `lv_font_conv` 1.5.3 在仓库根目录转换（仅 ASCII 范围）：
+
+```bash
+npx lv_font_conv --font assets/fonts/ProggyCleanSZ-1.ttf --range 0x20-0x7E --size 16 \
+  --bpp 1 --format lvgl --no-compress --lv-font-name proggy_16 \
+  --lv-include lvgl.h --output assets/fonts/proggy_16.c
+npx lv_font_conv --font assets/fonts/ProggyCleanSZ-1.ttf --range 0x20-0x7E --size 32 \
+  --bpp 1 --format lvgl --no-compress --lv-font-name proggy_32 \
+  --lv-include lvgl.h --output assets/fonts/proggy_32.c
+```
+
+ProggyClean 是 16px 原生像素字体（em 为 2048 单位、栅格 128 单位），只有 16 的整数倍才保持清晰；生成的字库在 `main/CMakeLists.txt` 注册，两个字号合计约 41 KB Flash。
+
 - 命名要能反映字族、字重、字级与格式。
 - 记录来源、许可、字符范围、转换命令与目标放置路径。
 - 添加字库前评估 Flash 与内部 RAM 影响；ESP32-C3 无 PSRAM。

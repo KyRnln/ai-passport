@@ -45,7 +45,8 @@ int main(void)
     // 无空格的 "data:Page0|...",且分隔符恰好落在分片接缝上。
     pc_metrics_parser_init(&p);
     const char frame2[] = "data:Page0|{|}Simple1|CPU Utilization 7 %{|}Simple2|Memory Utilization 33 %\n";
-    assert(pc_metrics_parser_feed(&p, frame2, 24));
+    // 首片停在记录中间,没有完整记录,按契约不应产生更新(与下方 "da" 分片用例一致)。
+    assert(!pc_metrics_parser_feed(&p, frame2, 24));
     assert(pc_metrics_parser_feed(&p, frame2 + 24, strlen(frame2) - 24));
     assert(p.metrics.cpu_pct == 7.0f);
     assert(p.metrics.mem_pct == 33.0f);
@@ -105,6 +106,44 @@ int main(void)
     feed_str(&p, "data: Page0|{|}S1|CPU Utilization 90 %\n");
     assert(p.metrics.cpu_pct == 90.0f);
     assert(p.updates == 2);
+
+    // AIDA64 系统运行时间:两段按 h:mm,三段按 h:mm:ss,"N day" 累加天数。
+    pc_metrics_parser_init(&p);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime 1:23:45\n");
+    assert(p.metrics.uptime_valid && p.metrics.uptime_sec == 5025);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime 0:12\n");
+    assert(p.metrics.uptime_sec == 720);
+    feed_str(&p, "data: Page0|{|}Simple1|Up Time 1 day 2:03:04\n");
+    assert(p.metrics.uptime_sec == 86400 + 2 * 3600 + 3 * 60 + 4);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime 10:00:00\n");
+    assert(p.metrics.uptime_sec == 36000);
+
+    // 与利用率项同帧共存互不影响;运行时间不会被当成百分比指标。
+    pc_metrics_parser_init(&p);
+    feed_str(&p,
+             "data: Page0|{|}Simple1|CPU Utilization 12 %{|}Simple2|UpTime 0:00:30"
+             "{|}Simple3|Memory Utilization 56 %\n\n");
+    assert(p.metrics.cpu_pct == 12.0f && p.metrics.mem_pct == 56.0f);
+    assert(p.metrics.uptime_sec == 30);
+    assert(p.updates == 3);
+
+    // 没有可解析时长时保持无效(不写入 0 秒)。
+    pc_metrics_parser_init(&p);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime n/a\n");
+    assert(!p.metrics.uptime_valid);
+
+    // AIDA64 中文界面:标签是中文(UTF-8),运行时间与利用率都要能命中。
+    pc_metrics_parser_init(&p);
+    feed_str(&p, "data: Page0|{|}Simple1|已运行时间 00:21:15\n");
+    assert(p.metrics.uptime_valid && p.metrics.uptime_sec == 21 * 60 + 15);
+
+    pc_metrics_parser_init(&p);
+    feed_str(&p,
+             "data: Page0|{|}Simple1|内存使用率 21%{|}Simple2|CPU 使用率 50%"
+             "{|}Simple3|GPU 使用率 5%{|}Simple4|已运行时间 00:21:15{|}\n\n");
+    assert(p.metrics.cpu_pct == 50.0f && p.metrics.gpu_pct == 5.0f);
+    assert(p.metrics.mem_pct == 21.0f && p.metrics.uptime_sec == 21 * 60 + 15);
+    assert(p.updates == 4);
 
     return 0;
 }

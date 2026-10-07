@@ -71,10 +71,18 @@ typedef enum {
     KIND_CPU,
     KIND_GPU,
     KIND_MEM,
+    KIND_UPTIME,
 } pc_kind_t;
 
 static pc_kind_t classify_record(const char *text)
 {
+    // AIDA64 的系统运行时间项没有利用率类关键词,先单独识别。
+    // 中文标签(AIDA64 与设备之间按 UTF-8 传输)同样命中。
+    if (contains_ci(text, "uptime") || contains_ci(text, "up time") ||
+        contains_ci(text, "运行时间") || contains_ci(text, "开机时间")) {
+        return KIND_UPTIME;
+    }
+
     const bool util = contains_ci(text, "util") || contains_ci(text, "usage") ||
                       contains_ci(text, "load") || contains_ci(text, "rate") ||
                       contains_ci(text, "occup") || contains_ci(text, "占用") ||
@@ -95,11 +103,95 @@ static pc_kind_t classify_record(const char *text)
     return KIND_NONE;
 }
 
+// 解析 AIDA64 时长文本,如 "1:23:45"、"0:12"、"1 day 2:03:04" → 秒。
+// 约定:两段按 h:mm(运行时间不会用 mm:ss 表示),三段按 h:mm:ss,
+// 前面若出现 "day" 则把紧邻的整数按天累加。
+static bool parse_uptime(const char *text, uint32_t *out)
+{
+    const char *colon = strrchr(text, ':');
+    if (colon == NULL) {
+        return false;
+    }
+
+    // 向前收拢成 [数字|:] 的最长片段,即时间串起点。
+    const char *start = colon;
+    while (start > text &&
+           (isdigit((unsigned char)start[-1]) || start[-1] == ':')) {
+        --start;
+    }
+    if (!isdigit((unsigned char)*start)) {
+        return false;
+    }
+    const char *end = start;
+    while (isdigit((unsigned char)*end) || *end == ':') {
+        ++end;
+    }
+
+    uint32_t parts[3] = {0, 0, 0};
+    int count = 0;
+    const char *q = start;
+    while (q < end && count < 3) {
+        if (!isdigit((unsigned char)*q)) {
+            return false;   // 连续 ':' 视为非法
+        }
+        uint32_t acc = 0;
+        while (q < end && isdigit((unsigned char)*q)) {
+            acc = acc * 10u + (uint32_t)(*q - '0');
+            ++q;
+        }
+        parts[count++] = acc;
+        if (q < end) {
+            ++q;            // 跳过 ':'
+        }
+    }
+    if (q != end || (count != 2 && count != 3)) {
+        return false;
+    }
+
+    uint32_t total = (count == 3) ? parts[0] * 3600u + parts[1] * 60u + parts[2]
+                                  : parts[0] * 3600u + parts[1] * 60u;
+
+    // "1 day 2:03:04":时间串之前若写着 day,把紧邻的整数当天数。
+    if (contains_ci(text, "day")) {
+        const char *d = start;
+        while (d > text && !isdigit((unsigned char)d[-1])) {
+            --d;
+        }
+        if (d > text) {
+            const char *ds = d;
+            while (ds > text && isdigit((unsigned char)ds[-1])) {
+                --ds;
+            }
+            uint32_t days = 0;
+            for (const char *r = ds; r < d; ++r) {
+                days = days * 10u + (uint32_t)(*r - '0');
+            }
+            total += days * 86400u;
+        }
+    }
+
+    *out = total;
+    return true;
+}
+
 static bool apply_metrics(pc_metrics_parser_t *p, const char *content)
 {
     const pc_kind_t kind = classify_record(content);
     if (kind == KIND_NONE) {
         return false;
+    }
+
+    pc_metrics_t *m = &p->metrics;
+
+    if (kind == KIND_UPTIME) {
+        uint32_t seconds = 0;
+        if (!parse_uptime(content, &seconds)) {
+            return false;
+        }
+        m->uptime_sec = seconds;
+        m->uptime_valid = true;
+        p->updates++;
+        return true;
     }
 
     float value = 0.0f;
@@ -113,7 +205,6 @@ static bool apply_metrics(pc_metrics_parser_t *p, const char *content)
         value = 100.0f;
     }
 
-    pc_metrics_t *m = &p->metrics;
     switch (kind) {
     case KIND_CPU:
         m->cpu_pct = value;

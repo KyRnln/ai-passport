@@ -46,3 +46,7 @@ struct _lv_display_t *bsp_lvgl_init(void);
 // LVGL 尚未就绪或超时时 lock 返回 false；只有 lock 成功后才调用 unlock。
 bool bsp_lvgl_lock(int timeout_ms);
 void bsp_lvgl_unlock(void);
+
+// 横屏方向切换:false = 默认方向,true = 画面 180° 翻转(硬件 MADCTL)。
+// 必须在 bsp_lvgl_init() 成功之后、且持有 bsp_lvgl_lock() 时调用。
+esp_err_t bsp_lvgl_set_flipped(bool flipped);
