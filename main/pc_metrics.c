@@ -2,6 +2,7 @@
 #include "pc_metrics.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -151,8 +152,36 @@ static bool parse_uptime(const char *text, uint32_t *out)
     uint32_t total = (count == 3) ? parts[0] * 3600u + parts[1] * 60u + parts[2]
                                   : parts[0] * 3600u + parts[1] * 60u;
 
+    // "3d 00:34:13" / "3 d 00:34:13":天数整数紧跟 d(允许空格)时按天累加。
+    // 只检查时间串之前的区域;Label 以 d 结尾但前面没有数字(如 "Recorded")不命中。
+    bool days_done = false;
+    const char *dp = start;
+    while (dp > text && isspace((unsigned char)dp[-1])) {
+        --dp;
+    }
+    if (dp > text && (dp[-1] == 'd' || dp[-1] == 'D')) {
+        --dp;   // dp 指向 'd'
+        const char *ds = dp;
+        while (ds > text && isspace((unsigned char)ds[-1])) {
+            --ds;
+        }
+        while (ds > text && isdigit((unsigned char)ds[-1])) {
+            --ds;
+        }
+        const char *r = ds;
+        uint32_t days = 0;
+        while (r < dp && isdigit((unsigned char)*r)) {
+            days = days * 10u + (uint32_t)(*r - '0');
+            ++r;
+        }
+        if (r > ds) {
+            total += days * 86400u;
+            days_done = true;
+        }
+    }
+
     // "1 day 2:03:04":时间串之前若写着 day,把紧邻的整数当天数。
-    if (contains_ci(text, "day")) {
+    if (!days_done && contains_ci(text, "day")) {
         const char *d = start;
         while (d > text && !isdigit((unsigned char)d[-1])) {
             --d;
@@ -324,4 +353,22 @@ bool pc_metrics_parser_feed(pc_metrics_parser_t *p, const char *data, size_t len
     }
 
     return updated;
+}
+
+size_t pc_uptime_format(uint32_t uptime_sec, char *buf, size_t buf_len)
+{
+    if (buf == NULL || buf_len == 0) {
+        return 0;
+    }
+    const uint32_t days = uptime_sec / 86400u;
+    const uint32_t rem = uptime_sec % 86400u;
+    const int written = snprintf(buf, buf_len, "%uD %02u:%02u:%02u",
+                                 (unsigned)days, (unsigned)(rem / 3600u),
+                                 (unsigned)((rem / 60u) % 60u),
+                                 (unsigned)(rem % 60u));
+    if (written < 0) {
+        buf[0] = '\0';
+        return 0;
+    }
+    return (size_t)written;   // 截断时返回值 >= buf_len(snprintf 语义)
 }

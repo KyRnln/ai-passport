@@ -424,6 +424,7 @@ static bool metrics_are_stale(int64_t last_update_ms)
 }
 
 // 顶栏运行时间:读取 AIDA64 返回的 UpTime(PC 已运行时间),不是本机开机时间。
+// 显示格式 "xxD HH:MM:SS",天数恒显示(pc_uptime_format)。
 static void refresh_uptime(void)
 {
     if (s_uptime == NULL) {
@@ -438,9 +439,7 @@ static void refresh_uptime(void)
     if (metrics_are_stale(last_update_ms) || !metrics.uptime_valid) {
         snprintf(text, sizeof(text), "-");
     } else {
-        const uint32_t total = metrics.uptime_sec;
-        snprintf(text, sizeof(text), "%u:%02u:%02u", (unsigned)(total / 3600u),
-                 (unsigned)((total / 60u) % 60u), (unsigned)(total % 60u));
+        pc_uptime_format(metrics.uptime_sec, text, sizeof(text));
     }
 
     // 文本没变就不重设,避免定时刷新反复触发重绘。

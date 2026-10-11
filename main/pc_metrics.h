@@ -12,8 +12,8 @@
 // "CPU #1 Utilization 12 %" 这类 Label 自带数字的情况。
 //
 // 另识别 AIDA64 的"系统运行时间"项(Label 含 "UpTime"/"Up Time"/"运行时间"/
-// "开机时间"):该值是时长文本(如 "1:23:45" 或 "1 day 2:03:04"),按
-// h:mm[:ss] 解析成总秒数,顶栏用它显示 PC 已运行时间。
+// "开机时间"):该值是时长文本(如 "1:23:45"、"1 day 2:03:04" 或 "3d 00:34:13"),
+// 按 h:mm[:ss] 解析成总秒数(天数前缀一并累加),顶栏用它显示 PC 已运行时间。
 //
 // 重要:本解析器【不按整行缓冲】。AIDA64 一帧里包含用户添加的全部 LCD 项,
 // 项多时该行可达数 KB;按行缓存会在无 PSRAM 的板子上浪费内存。这里改为
@@ -62,3 +62,7 @@ void pc_metrics_parser_init(pc_metrics_parser_t *p);
 // 送入一段 SSE 原始字节。TCP 会任意切分数据,本函数可接受任意边界的分片。
 // 返回:本次调用是否至少应用了一个新的指标值。
 bool pc_metrics_parser_feed(pc_metrics_parser_t *p, const char *data, size_t len);
+
+// 把运行时间格式化为顶栏文案 "xxD HH:MM:SS"(天数恒显示,时分秒补零)。
+// 返回 snprintf 语义的长度(不含结尾 '\0');返回值 >= buf_len 表示被截断。
+size_t pc_uptime_format(uint32_t uptime_sec, char *buf, size_t buf_len);

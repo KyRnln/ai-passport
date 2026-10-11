@@ -145,5 +145,33 @@ int main(void)
     assert(p.metrics.mem_pct == 21.0f && p.metrics.uptime_sec == 21 * 60 + 15);
     assert(p.updates == 4);
 
+    // AIDA64 中文界面常见 "3d 00:34:13":d 前(允许隔空格)的整数按天累加,
+    // 且不能与 "N day" 分支重复计数;Label 以 d 结尾不误命中。
+    pc_metrics_parser_init(&p);
+    feed_str(&p, "data: Page0|{|}Simple1|已运行时间 3d 00:34:13\n");
+    assert(p.metrics.uptime_valid && p.metrics.uptime_sec == 3 * 86400 + 34 * 60 + 13);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime 12d 05:06:07\n");
+    assert(p.metrics.uptime_sec == 12 * 86400 + 5 * 3600 + 6 * 60 + 7);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime 1 d 00:00:30\n");
+    assert(p.metrics.uptime_sec == 86400 + 30);
+    feed_str(&p, "data: Page0|{|}Simple1|UpTime 2d 12:00\n");
+    assert(p.metrics.uptime_sec == 2 * 86400 + 12 * 3600);
+
+    // 顶栏格式 "xxD HH:MM:SS":天数恒显示,时分秒补零。
+    char text[16];
+    pc_uptime_format(3 * 86400 + 34 * 60 + 13, text, sizeof(text));
+    assert(strcmp(text, "3D 00:34:13") == 0);
+    pc_uptime_format(0, text, sizeof(text));
+    assert(strcmp(text, "0D 00:00:00") == 0);
+    pc_uptime_format(3600 + 61, text, sizeof(text));
+    assert(strcmp(text, "0D 01:01:01") == 0);
+    // 最大秒数:5 位天数在 16 字节缓冲内不截断。
+    assert(pc_uptime_format(4294967295u, text, sizeof(text)) == 15);
+    assert(strcmp(text, "49710D 06:28:15") == 0);
+    // 小缓冲:截断但仍 NUL 结尾,返回值 >= buf_len。
+    char tiny[4];
+    assert(pc_uptime_format(0, tiny, sizeof(tiny)) >= sizeof(tiny));
+    assert(tiny[3] == '\0');
+
     return 0;
 }
