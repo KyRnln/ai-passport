@@ -35,12 +35,13 @@
 
 static const char *TAG = "pc_ui";
 
-// 界面字体:26px 正文/数值、13px 说明,都是汉仪像素设计网格(13px/em)的整数倍,
-// 且生成时做了二值化,屏幕上每个像素非亮即灭,因此是点对点显示。
-LV_FONT_DECLARE(app_font_26);
-LV_FONT_DECLARE(app_font_13);
-#define UI_FONT_BIG   (&app_font_26)
-#define UI_FONT_SMALL (&app_font_13)
+// 界面字体:24px 正文/数值、12px 说明,都是缝合像素字体的设计网格整数倍
+// (该字体 upem=1200,1 设计像素 = 100 单位,em 网格 12px),生成时做了二值化,
+// 屏幕上每个像素非亮即灭,因此是点对点显示。
+LV_FONT_DECLARE(app_font_24);
+LV_FONT_DECLARE(app_font_12);
+#define UI_FONT_BIG   (&app_font_24)
+#define UI_FONT_SMALL (&app_font_12)
 
 // 调色板:纯黑背景 + 白色元素,与设备屏幕的圆角/黑边观感一致。
 //   COL_TEXT  纯白 —— 页面正文/数值/进度条填充
@@ -69,38 +70,59 @@ LV_FONT_DECLARE(app_font_13);
 #define METRIC_CARD_W    304
 #define METRIC_CARD_H    56
 #define METRIC_CARD_GAP  5
-#define METRIC_CARD_TOP  35
-#define METRIC_TEXT_X    14
-#define METRIC_BAR_W     276
+#define METRIC_CARD_TOP  32
+#define METRIC_TEXT_X    8
+#define METRIC_BAR_W     288
 #define METRIC_BAR_H     8
 #define METRIC_BAR_Y     38
+#define METRIC_TEXT_Y    6
 #define ANIM_MS          240
 
 // 顶栏/底部提示行距屏幕上下边缘的留白,以及距左右边缘的留白。
-// 顶栏留白按 26px 字体的墨迹高度取值,避免压到第一张指标卡(卡顶 y=38)。
-#define TOP_BAR_Y        6
+// 顶栏留白按 24px 字体的墨迹高度取值,避免压到第一张指标卡(卡顶 y=32)。
+// 该字体半宽拉丁字形墨迹 16px 高、汉字墨迹 18px 上升部,共用基线时拉丁只低 2px,
+// 无需像 Unifont 那样额外补偿。
+#define TOP_BAR_Y        4
 #define BOTTOM_ROW_Y     8
 #define EDGE_MARGIN      16
 
-// 顶栏充电闪电:紧贴电量数字左侧。间距、下移量和自身跨度都按屏幕观感微调。
-#define TOPBAR_BOLT_GAP  4     // 闪电与电量数字之间的间距
-#define TOPBAR_BOLT_DY   7     // 闪电相对顶栏上沿的下移量
-#define TOPBAR_BOLT_W    9     // 闪电折线的横向跨度(点坐标 0..9,描边另算)
+// 顶栏 USB 标志:紧贴电量数字左侧,插在会枚举数据的 USB 口上时显示。
+#define TOPBAR_USB_GAP   4     // 标志与电量数字之间的间距
+#define TOPBAR_USB_DY    4     // 标志相对顶栏上沿的下移量(16px 标志与数字墨迹同样落在 y=8..24)
+#define TOPBAR_USB_W     16    // 标志位图宽度,用于按电量标签的实际宽度落位
 
-// 充电指示的闪电折线(约 9x16 的闭合轮廓,描边 2px)。
-static const lv_point_precise_t CHARGING_BOLT[] = {
-    { 6, 0 }, { 0, 9 }, { 4, 9 }, { 2, 16 }, { 9, 7 }, { 5, 7 }, { 6, 0 },
+// USB 三叉标志(A8 覆盖度位图,16x16,1px 线宽):中央杆顶端是向上的箭头,杆底是圆,
+// 左分支端点小圆、右分支端点方块——即标准 USB 图标。
+// 用 A8 而不是 A1/I1:A1 位图在软件渲染路径里没有实现,I1 需要内嵌调色板;
+// A8 位图可以直接用 image_recolor 染成主题色(见 build_topbar)。
+static const uint8_t USB_LOGO_A8[] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x00,
+    0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+    0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0x00, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-// 纯充电器只送 5V、不枚举数据,因此不会发 SOF,usb_serial_jtag_is_connected() 判不出来;
-// ESP32-C3 也没有 VBUS 检测寄存器,板上也没有充电 IC 的状态脚,所以补一条电池电压趋势:
-// 每 5 秒采一次 VCELL,窗口内电压持续升高即视为正在充电。代价是插上后约需半分钟才亮,
-// 且电量接近满、电压走平后会判为未充电。
-#define CHG_MV_SAMPLES      16     // 环形缓冲采样点数(每点约 5 秒,窗口约 80 秒)
-#define CHG_MV_MIN_SAMPLES  6      // 至少这么多点(约 30 秒)才判趋势
-#define CHG_MV_RISE         8      // 窗口内升/降达到该幅度(mV)才改判
-#define CHG_MV_GAP_MS       20000  // 距上次采样超过该时长说明中间没在采,整段作废
-#define CHG_FLAT_LIMIT      6      // 连续这么多次采样(约 30 秒)走平 → 视为未充电
+static const lv_image_dsc_t USB_LOGO = {
+    .header.magic = LV_IMAGE_HEADER_MAGIC,
+    .header.cf = LV_COLOR_FORMAT_A8,
+    .header.w = TOPBAR_USB_W,
+    .header.h = 16,
+    .header.stride = TOPBAR_USB_W,
+    .data_size = sizeof(USB_LOGO_A8),
+    .data = USB_LOGO_A8,
+};
 
 // 无新数据超过该时长,数值显示 "-"。
 #define METRICS_STALE_MS 2000
@@ -115,9 +137,10 @@ static const lv_point_precise_t CHARGING_BOLT[] = {
 #define SET_ROW_W           304
 #define SET_ROW_H           36
 #define SET_ROW_GAP         8
-#define SET_ROW_TOP         41
+#define SET_ROW_TOP         32
 #define SET_ROW_BORDER_W    2   // 光标框粗细
 #define SET_ROW_TEXT_X      10
+#define SET_ROW_TEXT_DY     (-2)  // 行内文字相对垂直居中的上移量
 
 typedef enum {
     PAGE_NONE = 0,
@@ -141,14 +164,8 @@ static page_t s_page = PAGE_NONE;
 static lv_timer_t *s_timer;
 static lv_obj_t *s_uptime;
 static lv_obj_t *s_battery;
-static lv_obj_t *s_charging;             // 充电闪电(判定在充电时显示)
-static bool s_charging_on;
-static int s_cell_mv[CHG_MV_SAMPLES];    // 电池电压采样环形缓冲(充电趋势判据)
-static int s_cell_mv_count;
-static int s_cell_mv_head;
-static int64_t s_cell_mv_ms;             // 上次采样时刻(ms)
-static bool s_charge_trend;              // 电压趋势判定:正在充电
-static int s_charge_flat;                // 连续走平的窗口数
+static lv_obj_t *s_usb_icon;             // 顶栏 USB 标志(插上 USB 数据口时显示)
+static bool s_usb_on;
 static lv_obj_t *s_status;
 static lv_obj_t *s_cursor_frame;
 static metric_row_t s_rows[METRIC_COUNT];
@@ -218,17 +235,17 @@ static void animate_bar_width(void *obj, int32_t width)
 }
 
 // 顶栏左侧是 PC 已运行时间(来自 AIDA64),右侧是电量;两处同字号。
-// 闪电紧贴电量数字左侧:电量位数会变("100%"→"98%"),标签宽度随之变化,
+// USB 标志紧贴电量数字左侧:电量位数会变("100%"→"98%"),标签宽度随之变化,
 // 因此按标签实际宽度用像素坐标落位,而不是相对屏幕右边缘固定对齐。
-static void place_charging(void)
+static void place_usb_icon(void)
 {
-    if (s_charging == NULL || s_battery == NULL) {
+    if (s_usb_icon == NULL || s_battery == NULL) {
         return;
     }
     lv_obj_update_layout(s_battery);
     const int digits_left = BSP_LCD_W - EDGE_MARGIN - lv_obj_get_width(s_battery);
-    lv_obj_set_pos(s_charging, digits_left - TOPBAR_BOLT_GAP - TOPBAR_BOLT_W,
-                   TOP_BAR_Y + TOPBAR_BOLT_DY);
+    lv_obj_set_pos(s_usb_icon, digits_left - TOPBAR_USB_GAP - TOPBAR_USB_W,
+                   TOP_BAR_Y + TOPBAR_USB_DY);
 }
 
 static void build_topbar(lv_obj_t *scr)
@@ -239,14 +256,14 @@ static void build_topbar(lv_obj_t *scr)
     s_battery = make_label(scr, "", UI_FONT_BIG, COL_MUTED);
     lv_obj_align(s_battery, LV_ALIGN_TOP_RIGHT, -EDGE_MARGIN, TOP_BAR_Y);
 
-    // 充电闪电:折线画在电量数字左侧,默认隐藏,USB 连接时显示。
-    s_charging = lv_line_create(scr);
-    lv_line_set_points(s_charging, CHARGING_BOLT,
-                       sizeof(CHARGING_BOLT) / sizeof(CHARGING_BOLT[0]));
-    lv_obj_set_style_line_width(s_charging, 2, 0);
-    lv_obj_set_style_line_color(s_charging, lv_color_hex(COL_OK), 0);
-    lv_obj_add_flag(s_charging, LV_OBJ_FLAG_HIDDEN);
-    place_charging();
+    // USB 标志:画在电量数字左侧,默认隐藏,插上 USB 数据口时显示。
+    // A8 位图没有颜色信息,用 image_recolor 染成与设备强调色一致的绿色。
+    s_usb_icon = lv_image_create(scr);
+    lv_image_set_src(s_usb_icon, &USB_LOGO);
+    lv_obj_set_style_image_recolor(s_usb_icon, lv_color_hex(COL_OK), 0);
+    lv_obj_set_style_image_recolor_opa(s_usb_icon, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_usb_icon, LV_OBJ_FLAG_HIDDEN);
+    place_usb_icon();
 }
 
 // 底部一行:左侧固定显示连接状态(常显),右侧显示当前页面的按键提示。
@@ -283,8 +300,8 @@ static void clear_screen(void)
     }
     s_uptime = NULL;
     s_battery = NULL;
-    s_charging = NULL;
-    s_charging_on = false;
+    s_usb_icon = NULL;
+    s_usb_on = false;
     s_status = NULL;
     s_cursor_frame = NULL;
     s_uptime_text[0] = '\0';
@@ -322,11 +339,13 @@ static void build_monitor(void)
         lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
         // 垂直卡片:上行"名称 + 数值",下行整宽进度条。
+        // 名称与数值都是拉丁字形(CPU/GPU/MEM/百分数),墨迹 16px 高;整块内容
+        // (文字与进度条)按观感比"上下居中"再上移 2px。
         lv_obj_t *name = make_label(card, names[i], UI_FONT_BIG, COL_TEXT);
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, METRIC_TEXT_X, 4);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, METRIC_TEXT_X, METRIC_TEXT_Y);
 
         s_rows[i].value = make_label(card, "-", UI_FONT_BIG, COL_TEXT);
-        lv_obj_align(s_rows[i].value, LV_ALIGN_TOP_RIGHT, -METRIC_TEXT_X, 4);
+        lv_obj_align(s_rows[i].value, LV_ALIGN_TOP_RIGHT, -METRIC_TEXT_X, METRIC_TEXT_Y);
         s_rows[i].target_pct = -1;
         s_rows[i].bar_width = 0;
 
@@ -366,10 +385,10 @@ static void build_settings(void)
         lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *name = make_label(row, names[i], UI_FONT_BIG, COL_TEXT);
-        lv_obj_align(name, LV_ALIGN_LEFT_MID, SET_ROW_TEXT_X, 0);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, SET_ROW_TEXT_X, SET_ROW_TEXT_DY);
 
         s_set_value[i] = make_label(row, "", UI_FONT_BIG, COL_TEXT);
-        lv_obj_align(s_set_value[i], LV_ALIGN_RIGHT_MID, -SET_ROW_TEXT_X, 0);
+        lv_obj_align(s_set_value[i], LV_ALIGN_RIGHT_MID, -SET_ROW_TEXT_X, SET_ROW_TEXT_DY);
     }
 
     // 光标框:与当前行等高,有且只有这一个框;默认白色,进入后绿色。
@@ -402,16 +421,16 @@ static void build_info(void)
     }
 
     lv_obj_t *head = make_label(s_scr, "AIDA64", UI_FONT_BIG, COL_TEXT);
-    lv_obj_align(head, LV_ALIGN_TOP_LEFT, 10, 44);
+    lv_obj_align(head, LV_ALIGN_TOP_LEFT, 10, 32);
 
     lv_obj_t *t = make_label(s_scr, target, UI_FONT_BIG, COL_TEXT);
     lv_obj_set_width(t, 300);
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);   // 地址过长时用省略号,避免出屏
-    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 10, 78);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 10, 62);
 
     lv_obj_t *src = make_label(s_scr, "数据源  AIDA64 RemoteSensor /sse",
                                UI_FONT_SMALL, COL_TEXT);
-    lv_obj_align(src, LV_ALIGN_TOP_LEFT, 10, 116);
+    lv_obj_align(src, LV_ALIGN_TOP_LEFT, 10, 92);
 
     lv_obj_t *note = make_label(s_scr,
                                 "在 AIDA64 中启用 RemoteSensor,\n"
@@ -421,7 +440,7 @@ static void build_info(void)
                                 UI_FONT_SMALL, COL_MUTED);
     lv_obj_set_width(note, 300);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 10, 136);
+    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 10, 112);
 
     build_bottom_row(s_scr, "OK: 返回");
 
@@ -437,14 +456,14 @@ static void build_confirm(void)
                                     COL_TEXT);
     lv_obj_set_width(question, 300);
     lv_label_set_long_mode(question, LV_LABEL_LONG_WRAP);
-    lv_obj_align(question, LV_ALIGN_TOP_LEFT, 10, 56);
+    lv_obj_align(question, LV_ALIGN_TOP_LEFT, 10, 44);
 
     lv_obj_t *note = make_label(s_scr,
                                 "监控会暂停, 设备将开启配网热点。",
                                 UI_FONT_SMALL, COL_MUTED);
     lv_obj_set_width(note, 300);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 10, 108);
+    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 10, 84);
 
     build_bottom_row(s_scr, "OK: 开始  UP/DOWN: 取消");
 
@@ -464,14 +483,14 @@ static void build_setup(void)
                                 UI_FONT_BIG, COL_TEXT);
     lv_obj_set_width(body, 300);
     lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
-    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 10, 40);
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 10, 32);
 
     lv_obj_t *note = make_label(s_scr,
                                 "手机扫码选择 Wi-Fi, 再填入 PC 地址。",
                                 UI_FONT_SMALL, COL_MUTED);
     lv_obj_set_width(note, 300);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 10, 160);
+    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 10, 140);
 
     // 配网态左侧同样常显连接状态(此时通常为 No Wi-Fi)。
     build_bottom_row(s_scr, "长按 OK: 退出配网");
@@ -487,12 +506,12 @@ static void build_message(const char *title, const char *body_text)
     lv_obj_t *title_label = make_label(s_scr, title, UI_FONT_BIG, COL_TEXT);
     lv_obj_set_width(title_label, 300);
     lv_label_set_long_mode(title_label, LV_LABEL_LONG_WRAP);
-    lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 10, 56);
+    lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 10, 40);
 
     lv_obj_t *body_label = make_label(s_scr, body_text, UI_FONT_SMALL, COL_MUTED);
     lv_obj_set_width(body_label, 300);
     lv_label_set_long_mode(body_label, LV_LABEL_LONG_WRAP);
-    lv_obj_align(body_label, LV_ALIGN_TOP_LEFT, 10, 108);
+    lv_obj_align(body_label, LV_ALIGN_TOP_LEFT, 10, 92);
 
     // 提示页的文案由 main 提供(启动与配网流程)。
     build_bottom_row(s_scr, "OK: 返回");
@@ -537,61 +556,24 @@ static void refresh_uptime(void)
     }
 }
 
-// 把一次 VCELL 采样喂进环形缓冲并更新趋势判定。
-// 最新点比窗口最老点高 CHG_MV_RISE 以上 → 充电中;低同样幅度 → 未充电;
-// 走平先沿用原判定,连续 CHG_FLAT_LIMIT 次采样都走平才判为未充电:
-// 这样满电后电压走平时闪电不会立刻熄灭,而拔掉充电器后电压会立刻下跌,很快熄灭。
-static void charge_trend_update(int mv)
+// USB 标志:插在会枚举数据的 USB 口上时显示,拔下即消失。
+// 判据是 usb_serial_jtag_is_connected(),即主机在发 SOF 包(会枚举数据的主机才会发),
+// 因此纯充电器(只给 5V、不枚举)不显示——板上没有 VBUS 检测寄存器或充电 IC 状态脚,
+// 软件层面无法区分"插了纯充电器"。
+static void refresh_usb(void)
 {
-    const int64_t now_ms = esp_timer_get_time() / 1000;
-    if (mv < 0) {
-        return;                             // 读不到电压:不采样也不改判定
-    }
-    if (s_cell_mv_ms != 0 && now_ms - s_cell_mv_ms > CHG_MV_GAP_MS) {
-        s_cell_mv_count = 0;                // 中间长时间没采,旧数据不再代表当前趋势
-        s_cell_mv_head = 0;
-        s_charge_flat = 0;
-    }
-    s_cell_mv_ms = now_ms;
-
-    s_cell_mv[s_cell_mv_head] = mv;
-    s_cell_mv_head = (s_cell_mv_head + 1) % CHG_MV_SAMPLES;
-    if (s_cell_mv_count < CHG_MV_SAMPLES) {
-        s_cell_mv_count++;
-    }
-    if (s_cell_mv_count < CHG_MV_MIN_SAMPLES) {
-        return;                             // 采样点还不够,先不下结论
-    }
-
-    const int oldest = s_cell_mv[(s_cell_mv_head + CHG_MV_SAMPLES - s_cell_mv_count) % CHG_MV_SAMPLES];
-    const int delta = mv - oldest;
-    if (delta >= CHG_MV_RISE) {
-        s_charge_trend = true;
-        s_charge_flat = 0;
-    } else if (delta <= -CHG_MV_RISE) {
-        s_charge_trend = false;
-        s_charge_flat = 0;
-    } else if (++s_charge_flat >= CHG_FLAT_LIMIT) {
-        s_charge_trend = false;
-    }
-}
-
-// 充电指示:插在电脑等带数据的 USB 口上(主机在发 SOF)立即显示;
-// 插纯充电器时没有 SOF,改由电池电压趋势判定(见 charge_trend_update)。
-static void refresh_charging(void)
-{
-    if (s_charging == NULL) {
+    if (s_usb_icon == NULL) {
         return;
     }
-    const bool on = usb_serial_jtag_is_connected() || s_charge_trend;
-    if (on == s_charging_on) {
+    const bool on = usb_serial_jtag_is_connected();
+    if (on == s_usb_on) {
         return;
     }
-    s_charging_on = on;
+    s_usb_on = on;
     if (on) {
-        lv_obj_remove_flag(s_charging, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_usb_icon, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_add_flag(s_charging, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_usb_icon, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -602,7 +584,6 @@ static void refresh_battery(void)
     }
     char text[16];
     const int soc = bsp_battery_soc();
-    charge_trend_update(bsp_battery_mv());
     if (soc < 0) {
         text[0] = '\0';                     // 读不到就不画数字
     } else {
@@ -611,7 +592,7 @@ static void refresh_battery(void)
     if (strcmp(text, s_battery_text) != 0) {
         snprintf(s_battery_text, sizeof(s_battery_text), "%s", text);
         lv_label_set_text(s_battery, text);
-        place_charging();   // 文字宽度变了,闪电跟着落到新位置
+        place_usb_icon();   // 文字宽度变了,USB 标志跟着落到新位置
     }
 }
 
@@ -782,7 +763,7 @@ static void ui_timer_cb(lv_timer_t *timer)
     }
     if (s_tick % 4 == 0) {
         refresh_uptime();   // 约 1 秒一次
-        refresh_charging();
+        refresh_usb();
     }
 
     if (s_page == PAGE_MONITOR) {
@@ -820,7 +801,7 @@ static void load_page(page_t page)
 
     refresh_uptime();
     refresh_battery();
-    refresh_charging();
+    refresh_usb();
     refresh_status();
     if (page == PAGE_MONITOR) {
         refresh_metrics();
@@ -881,7 +862,7 @@ void pc_ui_show_message(const char *title, const char *body)
     s_page = PAGE_MESSAGE;
     refresh_uptime();
     refresh_battery();
-    refresh_charging();
+    refresh_usb();
     refresh_status();
     bsp_lvgl_unlock();
 }
