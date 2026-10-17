@@ -11,11 +11,13 @@ idf_component_register(
          "pc_client.c"
          "pc_ui.c"
     INCLUDE_DIRS "."
-    REQUIRES bsp esp_event esp_http_client esp_http_server esp_netif esp_timer esp_wifi nvs_flash
+    REQUIRES bsp esp_driver_usb_serial_jtag esp_event esp_http_client esp_http_server esp_netif esp_timer esp_wifi nvs_flash
 )
 
-# ProggyClean 终端等宽字体(由 assets/fonts 下的 TTF 转换生成,见 assets/README.md)。
+# 界面字体:由 tools/gen_cjk_font.py 从汉仪像素 11px U 生成的 LVGL 子集
+# (来源与授权见 assets/README.md)。改动中文文案后需重新生成这两个文件。
+# assets/fonts/proggy_*.c 是旧的像素字体,保留作参考但不再编入本应用固件。
 target_sources(${COMPONENT_LIB} PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/proggy_16.c"
-    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/proggy_32.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/app_font_26.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../assets/fonts/app_font_13.c"
 )

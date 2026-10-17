@@ -107,7 +107,7 @@ static pc_kind_t classify_record(const char *text)
 // 解析 AIDA64 时长文本,如 "1:23:45"、"0:12"、"1 day 2:03:04" → 秒。
 // 约定:两段按 h:mm(运行时间不会用 mm:ss 表示),三段按 h:mm:ss,
 // 前面若出现 "day" 则把紧邻的整数按天累加。
-static bool parse_uptime(const char *text, uint32_t *out)
+static bool parse_uptime(const char *text, uint32_t *out, bool *has_days)
 {
     const char *colon = strrchr(text, ':');
     if (colon == NULL) {
@@ -196,10 +196,12 @@ static bool parse_uptime(const char *text, uint32_t *out)
                 days = days * 10u + (uint32_t)(*r - '0');
             }
             total += days * 86400u;
+            days_done = true;
         }
     }
 
     *out = total;
+    *has_days = days_done;
     return true;
 }
 
@@ -214,11 +216,13 @@ static bool apply_metrics(pc_metrics_parser_t *p, const char *content)
 
     if (kind == KIND_UPTIME) {
         uint32_t seconds = 0;
-        if (!parse_uptime(content, &seconds)) {
+        bool has_days = false;
+        if (!parse_uptime(content, &seconds, &has_days)) {
             return false;
         }
         m->uptime_sec = seconds;
         m->uptime_valid = true;
+        m->uptime_has_days = has_days;
         p->updates++;
         return true;
     }
@@ -355,17 +359,20 @@ bool pc_metrics_parser_feed(pc_metrics_parser_t *p, const char *data, size_t len
     return updated;
 }
 
-size_t pc_uptime_format(uint32_t uptime_sec, char *buf, size_t buf_len)
+size_t pc_uptime_format(uint32_t uptime_sec, bool has_days, char *buf, size_t buf_len)
 {
     if (buf == NULL || buf_len == 0) {
         return 0;
     }
     const uint32_t days = uptime_sec / 86400u;
     const uint32_t rem = uptime_sec % 86400u;
-    const int written = snprintf(buf, buf_len, "%uD %02u:%02u:%02u",
-                                 (unsigned)days, (unsigned)(rem / 3600u),
-                                 (unsigned)((rem / 60u) % 60u),
-                                 (unsigned)(rem % 60u));
+    const int written = has_days
+        ? snprintf(buf, buf_len, "%uD %02u:%02u:%02u",
+                   (unsigned)days, (unsigned)(rem / 3600u),
+                   (unsigned)((rem / 60u) % 60u), (unsigned)(rem % 60u))
+        : snprintf(buf, buf_len, "%02u:%02u:%02u",
+                   (unsigned)(uptime_sec / 3600u),
+                   (unsigned)((uptime_sec / 60u) % 60u), (unsigned)(uptime_sec % 60u));
     if (written < 0) {
         buf[0] = '\0';
         return 0;

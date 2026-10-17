@@ -86,8 +86,8 @@ static void enter_setup_mode(void)
     const esp_err_t err = wifi_setup_ap_start();
     if (err != ESP_OK) {
         s_in_setup = false;
-        pc_ui_show_message("Setup unavailable",
-                           "Could not start the setup access point. Reboot the device and try again.");
+        pc_ui_show_message("无法启动配网",
+                           "无法开启配网热点。请重启设备后重试。");
         return;
     }
 
@@ -113,16 +113,16 @@ static void enter_setup_mode(void)
         pc_ui_set_config(&cfg);
         enter_monitor_mode();
     } else {
-        pc_ui_show_message("Not configured",
-                           "No saved Wi-Fi / AIDA64 settings. Hold OK to run setup again.");
+        pc_ui_show_message("未完成配置",
+                           "没有已保存的 Wi-Fi / AIDA64 设置。长按 OK 重新配网。");
     }
 }
 
 static void enter_monitor_mode(void)
 {
     if (!pc_config_complete(&s_active_cfg)) {
-        pc_ui_show_message("Not configured",
-                           "Hold OK to connect Wi-Fi and enter the AIDA64 PC address.");
+        pc_ui_show_message("未完成配置",
+                           "长按 OK 连接 Wi-Fi 并填写 PC 地址。");
         return;
     }
 
@@ -143,16 +143,16 @@ static void enter_monitor_mode(void)
 
     if (!wifi_setup_sta_has_ip()) {
         s_monitoring = false;
-        pc_ui_show_message("Wi-Fi not connected",
-                           "Check that the network is 2.4GHz and in range, then hold OK to run setup again.");
+        pc_ui_show_message("Wi-Fi 未连接",
+                           "请确认网络为 2.4GHz 且在范围内, 再长按 OK 重新配网。");
         return;
     }
 
     const esp_err_t err = pc_client_start(&s_active_cfg);
     if (err != ESP_OK) {
         s_monitoring = false;
-        pc_ui_show_message("Monitor start failed",
-                           "Could not start the AIDA64 client. Hold OK to reconfigure.");
+        pc_ui_show_message("监控启动失败",
+                           "无法启动 AIDA64 客户端。长按 OK 重新配置。");
         return;
     }
 
@@ -306,8 +306,8 @@ void app_main(void)
 
     if (wifi_setup_prepare() != ESP_OK) {
         ESP_LOGE(TAG, "网络栈初始化失败,本次启动无法联网");
-        pc_ui_show_message("Network unavailable",
-                           "Wi-Fi failed to initialize. Reboot the device and try again.");
+        pc_ui_show_message("网络不可用",
+                           "Wi-Fi 初始化失败。请重启设备后重试。");
         return;
     }
 

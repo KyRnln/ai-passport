@@ -12,22 +12,35 @@
 
 | 文件 | 类型 | 用途与来源 |
 | --- | --- | --- |
-| [`fonts/ProggyCleanSZ-1.ttf`](fonts/ProggyCleanSZ-1.ttf) | TTF，16px 像素字体 | PC Monitor 终端风格界面的源字体。作者 Tristan Grimmer（2004），许可允许再分发。不直接烧录到设备。 |
-| [`fonts/proggy_16.c`](fonts/proggy_16.c) | LVGL 9 字体，1 bpp，16px | `main/pc_ui.c` 使用的正文/标签字号。 |
-| [`fonts/proggy_32.c`](fonts/proggy_32.c) | LVGL 9 字体，1 bpp，32px | `main/pc_ui.c` 使用的标题与大号百分比字号。 |
+| `fonts/HYPixel11pxU-2.ttf` | TTF，TrueType 轮廓 | 当前界面的源字体：汉仪像素 11px U（`HYPixel 11px U`，Version 9.00.00），11px 像素网格的中文字体。属**汉仪商业字体**：`name` 表 ID 13 指向 `http://hanyi.com.cn/law.php` 的授权说明，嵌入/再分发字形数据需取得汉仪授权。本文件不入库；重新生成时请自备有授权的副本。 |
+| [`fonts/app_font_26.c`](fonts/app_font_26.c) | LVGL 9 字体，4 bpp（像素非全亮即全灭），26px | 全部主要文字：标题、指标数值、设置条目、顶栏与配网页正文。26px 恰好是下方设计网格的 2 倍。 |
+| [`fonts/app_font_13.c`](fonts/app_font_13.c) | LVGL 9 字体，4 bpp（像素非全亮即全灭），13px | 提示、说明与提示页正文，即字体的设计网格字号。 |
+| [`fonts/proggy_16.c`](fonts/proggy_16.c)、[`fonts/proggy_32.c`](fonts/proggy_32.c) | LVGL 9 字体，1 bpp，16/32px | 旧的纯 ASCII 像素字体，保留作参考，不再编入应用固件。 |
 
-使用 `lv_font_conv` 1.5.3 在仓库根目录转换（仅 ASCII 范围）：
+当前字体由本仓库自带的转换脚本生成（fontTools + 内置扫描线栅格器）。本环境没有
+Node，无法使用 `lv_font_conv`。在仓库根目录运行：
 
 ```bash
-npx lv_font_conv --font assets/fonts/ProggyCleanSZ-1.ttf --range 0x20-0x7E --size 16 \
-  --bpp 1 --format lvgl --no-compress --lv-font-name proggy_16 \
-  --lv-include lvgl.h --output assets/fonts/proggy_16.c
-npx lv_font_conv --font assets/fonts/ProggyCleanSZ-1.ttf --range 0x20-0x7E --size 32 \
-  --bpp 1 --format lvgl --no-compress --lv-font-name proggy_32 \
-  --lv-include lvgl.h --output assets/fonts/proggy_32.c
+python tools/gen_cjk_font.py --font <路径>/HYPixel11pxU-2.ttf \
+  --size 26 --name app_font_26 --output assets/fonts/app_font_26.c --snap
+python tools/gen_cjk_font.py --font <路径>/HYPixel11pxU-2.ttf \
+  --size 13 --name app_font_13 --output assets/fonts/app_font_13.c --snap
 ```
 
-ProggyClean 是 16px 原生像素字体（em 为 2048 单位、栅格 128 单位），只有 16 的整数倍才保持清晰；生成的字库在 `main/CMakeLists.txt` 注册，两个字号合计约 41 KB Flash。
+设计网格比字体名更重要：`HYPixel 11px U` 的 `upem = 1000`，每 77 单位一个设计像素，
+因此它的 em 网格是 **13px**（77 × 13 = 1001），而不是 11px。按 11px 或 22px 生成会把
+一个设计像素映射到 1.69 个屏幕像素，字形边缘必然被抗锯齿成灰边；应按 13 的整数倍
+生成。`--snap` 点对点模式还会把覆盖度二值化为全亮/全灭，并把字宽取整到整数像素，
+使字形正好落在面板像素网格上。行高与基线取自子集的实际墨迹范围（另加 2px 留白），
+而不是字体自带的 `hhea`——后者 1.31em 的行框会把文字在框内整体往下推。两个字号合计
+约 90 KB Flash，在 `main/CMakeLists.txt` 注册。
+
+字符清单直接取自 `main/*.c` 的字符串字面量（忽略注释），改文案后重新生成会直接报出
+缺字；`--print-inventory` 可列出覆盖的字符，`--dump-codepoint` 可在没有设备时打印
+单个字形的位图。
+
+[`fonts/ProggyCleanSZ-1.ttf`](fonts/ProggyCleanSZ-1.ttf) 是保留的参考字体的源文件：
+ProggyClean，作者 Tristan Grimmer（2004），许可允许再分发；不直接烧录到设备。
 
 - 命名要能反映字族、字重、字级与格式。
 - 记录来源、许可、字符范围、转换命令与目标放置路径。
