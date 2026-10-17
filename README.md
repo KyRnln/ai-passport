@@ -7,7 +7,7 @@
 Turn the AI Passport into a wearable status display for a Windows PC. The
 device joins your Wi-Fi, connects to AIDA64's RemoteSensor stream, and shows
 live CPU, GPU, and memory utilization plus the PC's uptime on a 320 x 240
-landscape screen in a black-and-green terminal style.
+landscape screen in a black-on-white dot-matrix terminal style.
 
 This branch (`feature/aida64-pc-monitor`) contains the application only. The
 upstream baseline, hardware contract, and documentation index stay in
@@ -17,23 +17,30 @@ upstream baseline, hardware contract, and documentation index stay in
 
 - **Utilization cards**: CPU, GPU, and memory percentage, each drawn as a
   value line plus a full-width bar. A bar turns red at 100 %.
-- **PC uptime in the header**: read from AIDA64's uptime sensor and shown as
-  `h:mm:ss` next to the battery percentage.
+- **Header**: PC uptime on the left as `HH:MM:SS`, with the `xxD ` day prefix
+  only when AIDA64 reports days, and the battery percentage on the right. A green
+  USB logo appears left of the battery while the device is plugged into a USB
+  host that enumerates data; a charge-only adapter supplies 5 V without
+  enumerating, so it shows nothing.
+- **Rolling digits**: values, uptime and battery percentage roll one digit at a
+  time, in the direction the number moved.
 - **Local staleness handling**: when no new data arrives for two seconds, the
   values and the uptime fall back to `-`, so a frozen PC never looks live.
-- **Persistent link status**: the bottom-left corner always shows one of
-  `No Wi-Fi`, `Connected`, `Connecting`, or `PC offline`.
+- **Persistent link status**: the bottom-left corner always shows one of four
+  Chinese status strings: no Wi-Fi, connected, connecting, or PC offline.
 - **Settings page**: backlight brightness (10 % steps from 10 % to 100 %),
   Wi-Fi provisioning, screen rotation, and a device information page.
   Brightness and rotation are stored in NVS and restored at boot.
 - **Wi-Fi provisioning over SoftAP**: start the `AIPassport-Setup` hotspot,
   scan nearby networks from a phone, pick an SSID, and enter the password and
-  the PC's address. The configuration is stored in NVS.
+  the PC's address. The configuration is stored in NVS, and the page itself is
+  styled as a dark dot-matrix panel.
 - **Terminal look**: pure black background, white text, and hard square corners.
-  Text uses the subset of the Hanyi pixel face `HYPixel 11px U` stored in
-  `assets/fonts/app_font_26.c` and `assets/fonts/app_font_13.c`. Read the
-  [licence status of those generated fonts](assets/README.md#licence-status-of-the-generated-fonts)
-  before publishing or distributing this project.
+  Text uses 24 px and 12 px subsets of the Fusion Pixel Font, stored in
+  `assets/fonts/app_font_24.c` and `assets/fonts/app_font_12.c`. Both are pixel-exact
+  because they are generated at multiples of the font's 12 px design grid; the source
+  font and its OFL-1.1 licence are documented in
+  [assets/README.md](assets/README.md#fonts).
 
 ## Interaction
 
@@ -45,16 +52,16 @@ The three keys are `UP`, `DOWN`, and `OK`.
 
 **Settings page**
 
-- `UP` / `DOWN`: move the selection; the focused row shows a thin border.
+- `UP` / `DOWN`: move the selection; the focused row shows a 2 px white frame.
 - `OK`: enter the selected row.
 - `OK` (long press): return to the monitor page.
-- `Brightness`: `UP` / `DOWN` change the value in 10 % steps while the row
-  shows a thick bright border; `OK` finishes.
-- `Rotation`: `OK` flips the screen 180 degrees between the two landscape
+- Brightness (the on-device row labels are Chinese): the frame turns green on
+  entry; `UP` / `DOWN` change the value in 10 % steps and `OK` finishes.
+- Rotation: `OK` flips the screen 180 degrees between the two landscape
   directions and saves the choice.
-- `Wi-Fi`: `OK` opens a confirmation page; `OK` there starts provisioning and
+- Wi-Fi: `OK` opens a confirmation page; `OK` there starts provisioning and
   `UP` / `DOWN` cancels it.
-- `Device Info`: read-only page with the configured PC address and the AIDA64
+- Device Info: read-only page with the configured PC address and the AIDA64
   sensor names to use.
 
 **Setup mode** (entered after confirming Wi-Fi setup)

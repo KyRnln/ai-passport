@@ -12,54 +12,42 @@
 
 | 文件 | 类型 | 用途与来源 |
 | --- | --- | --- |
-| `fonts/HYPixel11pxU-2.ttf` | TTF，TrueType 轮廓 | 当前界面的源字体：汉仪像素 11px U（`HYPixel 11px U`，Version 9.00.00），11px 像素网格的中文字体。属**汉仪商业字体**：`name` 表 ID 13 指向 `http://hanyi.com.cn/law.php` 的授权说明，嵌入/再分发字形数据需取得汉仪授权。本文件不入库；重新生成时请自备有授权的副本。 |
-| [`fonts/app_font_26.c`](fonts/app_font_26.c) | LVGL 9 字体，4 bpp（像素非全亮即全灭），26px | 全部主要文字：标题、指标数值、设置条目、顶栏与配网页正文。26px 恰好是下方设计网格的 2 倍。 |
-| [`fonts/app_font_13.c`](fonts/app_font_13.c) | LVGL 9 字体，4 bpp（像素非全亮即全灭），13px | 提示、说明与提示页正文，即字体的设计网格字号。 |
+| `fonts/fusion-pixel-12px-monospaced-zh_hans.ttf` | TTF，TrueType 轮廓，12px 网格 | 当前界面的源字体：缝合像素字体 12px 等宽、简体中文版（`Fusion Pixel 12px Mono zh-Hans`，2026.10.16，作者 TakWolf）。`name` 表 ID 13 声明为 **SIL Open Font License 1.1**，允许商用、嵌入与再分发，只需保留版权声明与许可文本；发布包同时附带它修补字形所用各项目的 OFL 文本（方舟像素、俐方體 11 號、Galmuri）。本文件不入库；请从 <https://github.com/TakWolf/fusion-pixel-font/releases> 下载 12px 等宽 TTF 压缩包。 |
+| [`fonts/app_font_24.c`](fonts/app_font_24.c) | LVGL 9 字体，4 bpp（像素非全亮即全灭），24px | 全部主要文字：标题、指标数值、设置条目、顶栏与配网页正文。24px 恰好是下方设计网格的 2 倍。 |
+| [`fonts/app_font_12.c`](fonts/app_font_12.c) | LVGL 9 字体，4 bpp（像素非全亮即全灭），12px | 提示、说明与提示页正文，即字体的设计网格字号。 |
 | [`fonts/proggy_16.c`](fonts/proggy_16.c)、[`fonts/proggy_32.c`](fonts/proggy_32.c) | LVGL 9 字体，1 bpp，16/32px | 旧的纯 ASCII 像素字体，保留作参考，不再编入应用固件。 |
+| [`fonts/ProggyCleanSZ-1.ttf`](fonts/ProggyCleanSZ-1.ttf) | TTF，TrueType 轮廓 | 保留的参考字体的源文件：ProggyClean，作者 Tristan Grimmer（2004），许可允许再分发；不直接烧录到设备。 |
 
-### 生成字体的授权状态
-
-`fonts/app_font_26.c` 与 `fonts/app_font_13.c` 是上表汉仪字体的**派生数据**：其中的位图
-就是汉仪字形轮廓的栅格化结果，因此与源字体受同一份授权约束。这两个文件已提交进本仓库，
-由它们编出的固件同样包含这些字形数据。
-
-本项目使用的字体副本来自汉仪的**个人非商用授权**（`hanyi.com.cn/faq-doc-2`），仅限个人
-单机版用于学习、研究、欣赏，不可作任何商业发布或其他盈利性使用。汉仪官方条款明确：除
-个人非商业使用以外的任何使用方式，均需另行取得汉仪的书面许可（`hanyi.com.cn/license`）。
-因此把本仓库发布到平台、发布内嵌这些字形的固件，或任何商业使用，都超出了现有授权范围。
-
-在公开发布或分发本项目之前，请二选一：为预期用途取得汉仪的书面授权，或把这两个文件换成
-允许嵌入与再分发的字体。符合本仓库"整数倍设计网格"流程的中文开源像素字体可选缝合像素字体
-（Fusion Pixel Font，OFL-1.1，8/10/12px）与方舟像素字体（Ark Pixel Font，MIT / OFL-1.1，
-10/12/16px）；两者都允许商用与嵌入，但需保留其版权声明与许可文本。
-
-只删掉这两个生成文件并不能让仓库变得可分发的：`main/CMakeLists.txt` 会编译它们，因此必须
-换成其他字体或在本地生成；而且已推送的历史提交里仍然保留着这些字形数据。
+这两个生成文件先后替换过两套旧字体：先是由**汉仪商业字体**栅格化出的子集（当时持有的是
+个人非商用授权，不允许把字形数据随仓库再分发），后是 GNU Unifont 子集（16px 网格无法在
+不产生灰边的前提下变小）。前者已删除，后者为改用更小网格而替换；它们仍存在于更早的历史
+提交里。
 
 当前字体由本仓库自带的转换脚本生成（fontTools + 内置扫描线栅格器）。本环境没有
 Node，无法使用 `lv_font_conv`。在仓库根目录运行：
 
 ```bash
-python tools/gen_cjk_font.py --font <路径>/HYPixel11pxU-2.ttf \
-  --size 26 --name app_font_26 --output assets/fonts/app_font_26.c --snap
-python tools/gen_cjk_font.py --font <路径>/HYPixel11pxU-2.ttf \
-  --size 13 --name app_font_13 --output assets/fonts/app_font_13.c --snap
+python tools/gen_cjk_font.py --font <路径>/fusion-pixel-12px-monospaced-zh_hans.ttf \
+  --size 24 --name app_font_24 --output assets/fonts/app_font_24.c --snap
+python tools/gen_cjk_font.py --font <路径>/fusion-pixel-12px-monospaced-zh_hans.ttf \
+  --size 12 --name app_font_12 --output assets/fonts/app_font_12.c --snap
 ```
 
-设计网格比字体名更重要：`HYPixel 11px U` 的 `upem = 1000`，每 77 单位一个设计像素，
-因此它的 em 网格是 **13px**（77 × 13 = 1001），而不是 11px。按 11px 或 22px 生成会把
-一个设计像素映射到 1.69 个屏幕像素，字形边缘必然被抗锯齿成灰边；应按 13 的整数倍
-生成。`--snap` 点对点模式还会把覆盖度二值化为全亮/全灭，并把字宽取整到整数像素，
-使字形正好落在面板像素网格上。行高与基线取自子集的实际墨迹范围（另加 2px 留白），
-而不是字体自带的 `hhea`——后者 1.31em 的行框会把文字在框内整体往下推。两个字号合计
-约 90 KB Flash，在 `main/CMakeLists.txt` 注册。
+设计网格比文件名里的数字更重要：这份字体的 `upem = 1200`，每 100 单位一个设计像素，
+因此 em 网格是 **12px**，所有轮廓坐标都是 100 的整数倍。字号必须按 12 的整数倍生成
+（界面用 24px 作主字、12px 作提示），否则一个设计像素会映射到非整数屏幕像素，边缘被
+抗锯齿成灰边。`--snap` 点对点模式还会把覆盖度二值化为全亮/全灭，并把字宽取整到整数
+像素，使字形正好落在面板像素网格上。行高与基线取自子集的实际墨迹范围（另加 2px 留白），
+而不是字体自带的行高参数：24px 下墨迹在基线上方 18px、下方 4px（12px 下是 9px / 2px），
+因此两个字号分别是 `line_height` 24/13、`base_line` 4/2。半宽拉丁字形在 24px 下只有
+16px 高，而汉字上升部为 18px，共用基线时纯拉丁的标签（指标名称/数值等）会比汉字低
+2px，因此 `main/pc_ui.c` 把这些标签的墨迹在其所占区间内上下居中。两个字号合计约 82 KB
+Flash（字形位图 65 KB + 16 KB），在 `main/CMakeLists.txt` 注册。
 
 字符清单直接取自 `main/*.c` 的字符串字面量（忽略注释），改文案后重新生成会直接报出
-缺字；`--print-inventory` 可列出覆盖的字符，`--dump-codepoint` 可在没有设备时打印
-单个字形的位图。
-
-[`fonts/ProggyCleanSZ-1.ttf`](fonts/ProggyCleanSZ-1.ttf) 是保留的参考字体的源文件：
-ProggyClean，作者 Tristan Grimmer（2004），许可允许再分发；不直接烧录到设备。
+缺字；等宽版省掉了一些复杂字形，若将来报缺字，改用
+`fusion-pixel-12px-proportional-zh_hans.ttf` 即可。`--print-inventory` 可列出覆盖的字符，
+`--dump-codepoint` 可在没有设备时打印单个字形的位图。
 
 - 命名要能反映字族、字重、字级与格式。
 - 记录来源、许可、字符范围、转换命令与目标放置路径。
