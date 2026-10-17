@@ -19,9 +19,9 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # --- LVGL ---
 CONFIG_LV_COLOR_DEPTH_16=y
-# 20 ms display refresh period targets up to 50 FPS when rendering and SPI
-# transfer complete within the same budget.
-CONFIG_LV_DEF_REFR_PERIOD=20
+# 显示刷新周期 40 ms(25 FPS 上限)。界面本身最多以 ~4 Hz 刷新,动画期间 25 FPS
+# 已足够流畅,而把周期从 20 ms 放宽后,空闲时刷新定时器的唤醒次数减半。
+CONFIG_LV_DEF_REFR_PERIOD=40
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 # 应用界面自 2026-10 起改用 ProggyClean(assets/fonts/proggy_*.c),不再直接使用
@@ -32,7 +32,9 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_MEM_SIZE_KILOBYTES=24
 
 # --- 系统 ---
-CONFIG_FREERTOS_HZ=1000
+# 100 Hz 而非 1000 Hz:本应用的最短延时需求是 10 ms 级(界面上一次刷新、I2C 读电量),
+# 1 kHz 只会让空闲时每秒多出 900 次定时器中断。降到 100 Hz 后 pdMS_TO_TICKS(20) 仍是 2 tick。
+CONFIG_FREERTOS_HZ=100
 
 # --- Bluetooth LE / NimBLE ---
 # 本应用只用 Wi-Fi(SoftAP 配网 + SSE 取数),不需要蓝牙。

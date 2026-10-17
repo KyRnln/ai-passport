@@ -76,7 +76,17 @@ lv_display_t *bsp_lvgl_init(void) {
             ESP_LOGE(TAG, "LVGL port 初始化未完成，需重启后重试");
             return NULL;
         }
-        const lvgl_port_cfg_t pc = ESP_LVGL_PORT_INIT_CONFIG();
+        // 省电:LVGL 定时器周期由端口默认的 5ms(200Hz)放宽到 20ms(50Hz)。
+        // 界面最多以 ~4Hz 刷新一次,20ms 足够让进度条与数字滚动动画保持 50fps 观感,
+        // 而空闲时 CPU 的唤醒次数降到原来的 1/4。其余字段保持端口默认值。
+        const lvgl_port_cfg_t pc = {
+            .task_priority = 4,
+            .task_stack = 7168,
+            .task_affinity = -1,
+            .task_max_sleep_ms = 500,
+            .task_stack_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT,
+            .timer_period_ms = 20,
+        };
         if (lvgl_port_init(&pc) != ESP_OK) {
             s_port_init_failed = true;
             ESP_LOGE(TAG, "lvgl_port_init 失败，需重启后重试");

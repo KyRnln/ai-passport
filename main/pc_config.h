@@ -15,7 +15,9 @@
 #define PC_CFG_HOST_MAX 64   // IPv4/主机名
 #define PC_CFG_PORT_DEFAULT 80
 
-#define PC_CFG_BRIGHTNESS_DEFAULT 100
+// 默认背光 60%:屏幕背光是整机最稳定的耗电项,满亮度(100%)对续航影响明显。
+// 仅作默认值,设备上仍可通过设置页在 10%~100% 之间调节。
+#define PC_CFG_BRIGHTNESS_DEFAULT 60
 #define PC_CFG_BRIGHTNESS_MIN 10     // 最低 10%,避免调到全黑看不见
 #define PC_CFG_BRIGHTNESS_MAX 100
 #define PC_CFG_BRIGHTNESS_STEP 10    // 每次调整的档位

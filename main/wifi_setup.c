@@ -139,6 +139,16 @@ esp_err_t wifi_setup_prepare(void)
         return err;
     }
 
+    // 省电:把 STA 的省电模式从 IDF 默认的 MIN_MODEM 提到 MAX_MODEM ——
+    // 空闲时只在 listen_interval 个信标周期后才醒来收一次缓存数据,
+    // 射频平均电流明显低于"每个 DTIM 都醒"。代价是下行延迟增加约 0.2~0.5s,
+    // 而界面数据本身是 ~1 秒一条的推送,这点延迟不可见。
+    // 只记警告:省电属优化项,失败不应让网络初始化失败。
+    const esp_err_t ps_err = esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+    if (ps_err != ESP_OK) {
+        ESP_LOGW(TAG, "设置 Wi-Fi 省电模式失败: %s", esp_err_to_name(ps_err));
+    }
+
     s_wifi_ready = true;
     ESP_LOGI(TAG, "网络栈就绪");
     return ESP_OK;
@@ -156,6 +166,9 @@ esp_err_t wifi_setup_sta_connect(const pc_config_t *cfg)
     wifi_config_t wifi_cfg = {0};
     strlcpy((char *)wifi_cfg.sta.ssid, cfg->ssid, sizeof(wifi_cfg.sta.ssid));
     strlcpy((char *)wifi_cfg.sta.password, cfg->password, sizeof(wifi_cfg.sta.password));
+    // 配合 MAX_MODEM:把睡眠间隔从默认的 3 个信标周期放宽到 5(约 0.5s),
+    // 进一步降低射频平均电流。若局域网出现卡顿(丢包、ARP 过期),把这个值调回 1~3。
+    wifi_cfg.sta.listen_interval = 5;
 
     xEventGroupClearBits(s_events, BIT_STA_GOT_IP);
 
