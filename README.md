@@ -29,9 +29,11 @@ upstream baseline, hardware contract, and documentation index stay in
 - **Wi-Fi provisioning over SoftAP**: start the `AIPassport-Setup` hotspot,
   scan nearby networks from a phone, pick an SSID, and enter the password and
   the PC's address. The configuration is stored in NVS.
-- **Terminal look**: pure black background, green text, and the ProggyClean
-  pixel font. The font is generated from `assets/fonts/ProggyCleanSZ-1.ttf`
-  into `proggy_16.c` and `proggy_32.c` and covers ASCII only.
+- **Terminal look**: pure black background, white text, and hard square corners.
+  Text uses the subset of the Hanyi pixel face `HYPixel 11px U` stored in
+  `assets/fonts/app_font_26.c` and `assets/fonts/app_font_13.c`. Read the
+  [licence status of those generated fonts](assets/README.md#licence-status-of-the-generated-fonts)
+  before publishing or distributing this project.
 
 ## Interaction
 

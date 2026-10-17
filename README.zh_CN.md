@@ -25,9 +25,10 @@ AIDA64 的 RemoteSensor 数据流，在 320 x 240 横屏上以黑底绿字的终
   亮度与方向写入 NVS，开机自动恢复。
 - **SoftAP 配网**：开启 `AIPassport-Setup` 热点，用手机扫描周边网络、选择 SSID，
   再填入密码与 PC 地址，配置保存在 NVS。
-- **终端观感**：纯黑背景、绿色文字、ProggyClean 像素字体。字体由
-  `assets/fonts/ProggyCleanSZ-1.ttf` 生成到 `proggy_16.c` 与 `proggy_32.c`，
-  仅覆盖 ASCII。
+- **终端观感**：纯黑背景、白色文字、全部直角。文字使用汉仪像素字体
+  `HYPixel 11px U` 的子集，存放于 `assets/fonts/app_font_26.c` 与
+  `assets/fonts/app_font_13.c`。发布或分发本项目前，请先阅读
+  [这些生成字体的授权状态](assets/README.zh_CN.md#生成字体的授权状态)。
 
 ## 交互
 
