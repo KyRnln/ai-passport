@@ -69,7 +69,7 @@ LV_FONT_DECLARE(app_font_13);
 #define METRIC_CARD_W    304
 #define METRIC_CARD_H    56
 #define METRIC_CARD_GAP  5
-#define METRIC_CARD_TOP  38
+#define METRIC_CARD_TOP  35
 #define METRIC_TEXT_X    14
 #define METRIC_BAR_W     276
 #define METRIC_BAR_H     8
@@ -91,6 +91,16 @@ LV_FONT_DECLARE(app_font_13);
 static const lv_point_precise_t CHARGING_BOLT[] = {
     { 6, 0 }, { 0, 9 }, { 4, 9 }, { 2, 16 }, { 9, 7 }, { 5, 7 }, { 6, 0 },
 };
+
+// 纯充电器只送 5V、不枚举数据,因此不会发 SOF,usb_serial_jtag_is_connected() 判不出来;
+// ESP32-C3 也没有 VBUS 检测寄存器,板上也没有充电 IC 的状态脚,所以补一条电池电压趋势:
+// 每 5 秒采一次 VCELL,窗口内电压持续升高即视为正在充电。代价是插上后约需半分钟才亮,
+// 且电量接近满、电压走平后会判为未充电。
+#define CHG_MV_SAMPLES      16     // 环形缓冲采样点数(每点约 5 秒,窗口约 80 秒)
+#define CHG_MV_MIN_SAMPLES  6      // 至少这么多点(约 30 秒)才判趋势
+#define CHG_MV_RISE         8      // 窗口内升/降达到该幅度(mV)才改判
+#define CHG_MV_GAP_MS       20000  // 距上次采样超过该时长说明中间没在采,整段作废
+#define CHG_FLAT_LIMIT      6      // 连续这么多次采样(约 30 秒)走平 → 视为未充电
 
 // 无新数据超过该时长,数值显示 "-"。
 #define METRICS_STALE_MS 2000
@@ -131,8 +141,14 @@ static page_t s_page = PAGE_NONE;
 static lv_timer_t *s_timer;
 static lv_obj_t *s_uptime;
 static lv_obj_t *s_battery;
-static lv_obj_t *s_charging;             // 充电闪电(USB 连接时显示)
+static lv_obj_t *s_charging;             // 充电闪电(判定在充电时显示)
 static bool s_charging_on;
+static int s_cell_mv[CHG_MV_SAMPLES];    // 电池电压采样环形缓冲(充电趋势判据)
+static int s_cell_mv_count;
+static int s_cell_mv_head;
+static int64_t s_cell_mv_ms;             // 上次采样时刻(ms)
+static bool s_charge_trend;              // 电压趋势判定:正在充电
+static int s_charge_flat;                // 连续走平的窗口数
 static lv_obj_t *s_status;
 static lv_obj_t *s_cursor_frame;
 static metric_row_t s_rows[METRIC_COUNT];
@@ -521,15 +537,53 @@ static void refresh_uptime(void)
     }
 }
 
-// 充电指示:USB 已连接(插在电脑等带数据的 USB 上)即视为在充电。
-// CW2017 本身没有充电状态寄存器,板上也没有充电 IC 的 STAT 引脚,
-// 因此用 USB-Serial-JTAG 的连接状态作为判据:插上即显示,拔下即消失。
+// 把一次 VCELL 采样喂进环形缓冲并更新趋势判定。
+// 最新点比窗口最老点高 CHG_MV_RISE 以上 → 充电中;低同样幅度 → 未充电;
+// 走平先沿用原判定,连续 CHG_FLAT_LIMIT 次采样都走平才判为未充电:
+// 这样满电后电压走平时闪电不会立刻熄灭,而拔掉充电器后电压会立刻下跌,很快熄灭。
+static void charge_trend_update(int mv)
+{
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    if (mv < 0) {
+        return;                             // 读不到电压:不采样也不改判定
+    }
+    if (s_cell_mv_ms != 0 && now_ms - s_cell_mv_ms > CHG_MV_GAP_MS) {
+        s_cell_mv_count = 0;                // 中间长时间没采,旧数据不再代表当前趋势
+        s_cell_mv_head = 0;
+        s_charge_flat = 0;
+    }
+    s_cell_mv_ms = now_ms;
+
+    s_cell_mv[s_cell_mv_head] = mv;
+    s_cell_mv_head = (s_cell_mv_head + 1) % CHG_MV_SAMPLES;
+    if (s_cell_mv_count < CHG_MV_SAMPLES) {
+        s_cell_mv_count++;
+    }
+    if (s_cell_mv_count < CHG_MV_MIN_SAMPLES) {
+        return;                             // 采样点还不够,先不下结论
+    }
+
+    const int oldest = s_cell_mv[(s_cell_mv_head + CHG_MV_SAMPLES - s_cell_mv_count) % CHG_MV_SAMPLES];
+    const int delta = mv - oldest;
+    if (delta >= CHG_MV_RISE) {
+        s_charge_trend = true;
+        s_charge_flat = 0;
+    } else if (delta <= -CHG_MV_RISE) {
+        s_charge_trend = false;
+        s_charge_flat = 0;
+    } else if (++s_charge_flat >= CHG_FLAT_LIMIT) {
+        s_charge_trend = false;
+    }
+}
+
+// 充电指示:插在电脑等带数据的 USB 口上(主机在发 SOF)立即显示;
+// 插纯充电器时没有 SOF,改由电池电压趋势判定(见 charge_trend_update)。
 static void refresh_charging(void)
 {
     if (s_charging == NULL) {
         return;
     }
-    const bool on = usb_serial_jtag_is_connected();
+    const bool on = usb_serial_jtag_is_connected() || s_charge_trend;
     if (on == s_charging_on) {
         return;
     }
@@ -548,6 +602,7 @@ static void refresh_battery(void)
     }
     char text[16];
     const int soc = bsp_battery_soc();
+    charge_trend_update(bsp_battery_mv());
     if (soc < 0) {
         text[0] = '\0';                     // 读不到就不画数字
     } else {
